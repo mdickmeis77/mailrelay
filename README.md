@@ -23,7 +23,7 @@ SSRS (Abo-Versand) ─────────┘                            │
 ## Inhalt
 
 1. [Entra ID: App-Registrierung](#1-entra-id-app-registrierung)
-2. [Exchange Online: Absender einschränken](#2-exchange-online-absender-einschränken)
+2. [Exchange Online: Berechtigungen und Absender einschränken](#2-exchange-online-berechtigungen-und-absender-einschränken)
 3. [Datenbank installieren](#3-datenbank-installieren)
 4. [EXE erstellen](#4-exe-erstellen)
 5. [Dienst installieren](#5-dienst-installieren)
@@ -39,20 +39,46 @@ SSRS (Abo-Versand) ─────────┘                            │
 
 Pro Tenant ein Profil, pro Profil eine App-Registrierung.
 
-1. Entra Admin Center → **App-Registrierungen** → **Neue Registrierung**, Name z.B. `Vemas.MailRelay`, nur dieses Verzeichnis.
-2. **Zertifikate & Geheimnisse** → **Neuer geheimer Clientschlüssel**. Den **Wert** (nicht die ID) sofort kopieren und das Ablaufdatum notieren.
+1. Entra Admin Center → **Anwendungen** → **App-Registrierungen** → **Neue Registrierung**:
+
+   | Feld | Wert |
+   |---|---|
+   | Name | `Vemas.MailRelay` (frei wählbar) |
+   | Unterstützte Kontotypen | Nur Konten in diesem Organisationsverzeichnis (ein Mandant) |
+   | Umleitungs-URI | leer lassen (für Client Credentials nicht nötig) |
+
+2. **Zertifikate & Geheimnisse** → **Neuer geheimer Clientschlüssel** (max. 24 Monate). Den **Wert** (nicht die ID)
+   sofort kopieren und das Ablaufdatum notieren.
 3. **Übersicht**: Anwendungs-ID (Client-ID) und Verzeichnis-ID (Tenant-ID) notieren.
-4. Berechtigung: siehe Abschnitt 2 – entweder Exchange-RBAC (empfohlen) **oder** `Mail.Send` (Anwendung) in Entra.
+4. Berechtigungen: siehe Abschnitt 2 – entweder Exchange-RBAC (empfohlen) **oder** `Mail.Send` und `Mail.ReadWrite`
+   (Anwendung) in Entra.
 
-## 2. Exchange Online: Absender einschränken
+Zuordnung zum Profil in der Weboberfläche:
 
-> **Wichtig:** Die Entra-Berechtigung `Mail.Send` (Anwendung) erlaubt der App, im Namen **jedes** Postfachs
-> des Tenants zu senden. Deshalb die Berechtigung über Exchange auf die benötigten Postfächer begrenzen.
+| Feld im Profil | Herkunft in Entra |
+|---|---|
+| Tenant-ID | Übersicht → Verzeichnis-ID (Mandant) |
+| Client-ID | Übersicht → Anwendungs-ID (Client) |
+| Client Secret | Wert des geheimen Clientschlüssels |
+| Secret gültig bis | Ablaufdatum des geheimen Clientschlüssels |
+| Standard-Absender | Postfach, aus dem gesendet wird – muss im Exchange-Bereich aus Abschnitt 2 liegen |
+
+## 2. Exchange Online: Berechtigungen und Absender einschränken
+
+Die App braucht zwei Rechte auf die Absender-Postfächer:
+
+| Recht | Wofür |
+|---|---|
+| `Mail.Send` | Versand aller Mails |
+| `Mail.ReadWrite` | Mails über ca. 3 MB: Der Dienst legt sie als Entwurf an, lädt die Anhänge hoch und sendet den Entwurf. Ohne dieses Recht schlagen genau diese Mails mit `403 ErrorAccessDenied` fehl. |
+
+> **Wichtig:** Beide Anwendungsberechtigungen gelten ohne Einschränkung für **jedes** Postfach des Tenants,
+> `Mail.ReadWrite` erlaubt zusätzlich das Lesen. Deshalb beide über Exchange auf die benötigten Postfächer begrenzen.
 
 ### Empfohlen: RBAC for Applications
 
-Bei dieser Variante wird **keine** `Mail.Send`-Berechtigung in Entra erteilt (Entra- und Exchange-Rechte
-addieren sich – eine Entra-Zustimmung würde die Einschränkung aushebeln).
+Bei dieser Variante wird in Entra **keine** `Mail.Send`- oder `Mail.ReadWrite`-Berechtigung erteilt (Entra- und
+Exchange-Rechte addieren sich – eine Entra-Zustimmung würde die Einschränkung aushebeln).
 
 ```powershell
 Connect-ExchangeOnline
@@ -64,18 +90,20 @@ New-ServicePrincipal -AppId "<Client-ID>" -ObjectId "<Objekt-ID Unternehmensanwe
 New-ManagementScope -Name "MailRelay-Absender" `
     -RecipientRestrictionFilter "MemberOfGroup -eq 'CN=MailRelay-Absender,OU=...,DC=...'"
 
-New-ManagementRoleAssignment -App "<Client-ID>" -Role "Application Mail.Send" -CustomResourceScope "MailRelay-Absender"
+New-ManagementRoleAssignment -App "<Client-ID>" -Role "Application Mail.Send"      -CustomResourceScope "MailRelay-Absender"
+New-ManagementRoleAssignment -App "<Client-ID>" -Role "Application Mail.ReadWrite" -CustomResourceScope "MailRelay-Absender"
 
 # Prüfen
 Test-ServicePrincipalAuthorization -Identity "<Client-ID>" -Resource "reports@firma.de"
 ```
 
 Bei **SendAs**-Profilen alle erlaubten Absender in die Gruppe aufnehmen, bei **Fester Absender** nur das Standard-Postfach.
+Für genau ein Postfach geht statt der Gruppe auch `-RecipientRestrictionFilter "PrimarySmtpAddress -eq 'reports@firma.de'"`.
 Änderungen können bis zu 2 Stunden dauern, bis sie wirken.
 
-### Alternative: Mail.Send in Entra + Application Access Policy
+### Alternative: Berechtigungen in Entra + Application Access Policy
 
-`Mail.Send` (Anwendung) in Entra erteilen, Administratorzustimmung geben, dann:
+`Mail.Send` und `Mail.ReadWrite` (Anwendung) in Entra erteilen, Administratorzustimmung geben, dann:
 
 ```powershell
 New-ApplicationAccessPolicy -AppId "<Client-ID>" -PolicyScopeGroupId "mailrelay-absender@firma.de" `
@@ -286,7 +314,7 @@ UPDATE mailrelay.SmtpUser SET PasswordPlain = N'<neues Passwort>'               
 |---|---|
 | `AADSTS7000215: Invalid client secret` | Secret falsch oder abgelaufen → neues Secret in Entra erstellen und im Profil eintragen |
 | `AADSTS700016: Application ... not found` | Client-ID oder Tenant-ID falsch |
-| `Graph 403 ErrorAccessDenied` / `Access is denied` | App hat keine Berechtigung für dieses Postfach → Abschnitt 2 prüfen (Gruppe, Wartezeit) |
+| `Graph 403 ErrorAccessDenied` / `Access is denied` | App hat keine Berechtigung für dieses Postfach → Abschnitt 2 prüfen (Gruppe, Wartezeit). Nur große Mails betroffen: `Mail.ReadWrite` fehlt |
 | `Graph 404 ErrorInvalidUser` / `ResourceNotFound` | Absenderpostfach existiert nicht |
 | `Client Secret kann auf diesem Server nicht entschlüsselt werden` | DB von anderem Server übernommen → Secret neu eintragen |
 | `MIME-Inhalt nicht mehr vorhanden` | Aufbewahrungsfrist abgelaufen, Neu senden nicht mehr möglich |
