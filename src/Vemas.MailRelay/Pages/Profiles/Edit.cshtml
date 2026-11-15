@@ -51,21 +51,24 @@
             <label asp-for="Input.SenderMode">Modus</label>
             <select asp-for="Input.SenderMode">
                 <option value="FixedSender">Fester Absender – immer das Standard-Postfach</option>
-                <option value="SendAs">SendAs – Absender aus der Mail, sofern erlaubt</option>
+                <option value="SendAs">Senden als – Absender aus der Mail, über das Standard-Postfach</option>
             </select>
-            <span class="hint">Fester Absender: der ursprüngliche Absender wird als Antwortadresse (Reply-To) übernommen.</span>
+            <span class="hint">Fester Absender: der ursprüngliche Absender wird als Antwortadresse (Reply-To) übernommen.<br />
+                Senden als: das Standard-Postfach braucht in Exchange das Recht „Senden als“ auf jeden Absender.</span>
         </div>
         <div class="field">
-            <label asp-for="Input.DefaultSender">Standard-Absender (Postfach)</label>
+            <label asp-for="Input.DefaultSender">Standard-Postfach (meldet sich an und versendet)</label>
             <input type="email" asp-for="Input.DefaultSender" />
             <span asp-validation-for="Input.DefaultSender" class="error-text"></span>
+            <span class="hint">Nur auf dieses Postfach braucht die App Exchange-Rechte (Mail.Send, Mail.ReadWrite).</span>
         </div>
     </div>
     <div class="field">
-        <label asp-for="Input.AllowedSenders">Erlaubte Absender (nur SendAs) – eine Adresse oder *@@domain.de pro Zeile</label>
+        <label asp-for="Input.AllowedSenders">Erlaubte Absender (nur „Senden als“) – eine Adresse oder *@@domain.de pro Zeile</label>
         <textarea asp-for="Input.AllowedSenders"></textarea>
         <span asp-validation-for="Input.AllowedSenders" class="error-text"></span>
-        <span class="hint">Der Standard-Absender ist immer erlaubt. Zusätzlich muss die App in Exchange für diese Postfächer berechtigt sein.</span>
+        <span class="hint">Filter beim SMTP-Eingang; das Standard-Postfach ist immer erlaubt. Zusätzlich muss das Standard-Postfach in Exchange „Senden als“ auf diese Absender haben:
+            Add-RecipientPermission -Identity &lt;Absender&gt; -Trustee &lt;Standard-Postfach&gt; -AccessRights SendAs</span>
     </div>
 
     <div class="actions">

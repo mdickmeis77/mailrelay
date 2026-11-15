@@ -61,7 +61,7 @@ Zuordnung zum Profil in der Weboberfläche:
 | Client-ID | Übersicht → Anwendungs-ID (Client) |
 | Client Secret | Wert des geheimen Clientschlüssels |
 | Secret gültig bis | Ablaufdatum des geheimen Clientschlüssels |
-| Standard-Absender | Postfach, aus dem gesendet wird – muss im Exchange-Bereich aus Abschnitt 2 liegen |
+| Standard-Postfach | Postfach, das sich anmeldet und versendet (Konto A) – muss im Exchange-Bereich aus Abschnitt 2 liegen |
 
 ## 2. Exchange Online: Berechtigungen und Absender einschränken
 
@@ -86,27 +86,41 @@ Connect-ExchangeOnline
 # Objekt-ID der Unternehmensanwendung (Entra > Unternehmensanwendungen > Vemas.MailRelay), NICHT die der App-Registrierung
 New-ServicePrincipal -AppId "<Client-ID>" -ObjectId "<Objekt-ID Unternehmensanwendung>" -DisplayName "Vemas.MailRelay"
 
-# Bereich: nur Mitglieder einer (E-Mail-aktivierten Sicherheits-)Gruppe
-New-ManagementScope -Name "MailRelay-Absender" `
-    -RecipientRestrictionFilter "MemberOfGroup -eq 'CN=MailRelay-Absender,OU=...,DC=...'"
+# Bereich: nur das Standard-Postfach des Profils (Konto A)
+New-ManagementScope -Name "MailRelay-Postfach" `
+    -RecipientRestrictionFilter "PrimarySmtpAddress -eq 'relay@firma.de'"
 
-New-ManagementRoleAssignment -App "<Client-ID>" -Role "Application Mail.Send"      -CustomResourceScope "MailRelay-Absender"
-New-ManagementRoleAssignment -App "<Client-ID>" -Role "Application Mail.ReadWrite" -CustomResourceScope "MailRelay-Absender"
+New-ManagementRoleAssignment -App "<Client-ID>" -Role "Application Mail.Send"      -CustomResourceScope "MailRelay-Postfach"
+New-ManagementRoleAssignment -App "<Client-ID>" -Role "Application Mail.ReadWrite" -CustomResourceScope "MailRelay-Postfach"
 
 # Prüfen
-Test-ServicePrincipalAuthorization -Identity "<Client-ID>" -Resource "reports@firma.de"
+Test-ServicePrincipalAuthorization -Identity "<Client-ID>" -Resource "relay@firma.de"
 ```
 
-Bei **SendAs**-Profilen alle erlaubten Absender in die Gruppe aufnehmen, bei **Fester Absender** nur das Standard-Postfach.
-Für genau ein Postfach geht statt der Gruppe auch `-RecipientRestrictionFilter "PrimarySmtpAddress -eq 'reports@firma.de'"`.
-Änderungen können bis zu 2 Stunden dauern, bis sie wirken.
+Die App braucht nur Rechte auf das **Standard-Postfach** (Konto A), auch im Modus „Senden als“.
+Arbeiten mehrere Profile im selben Tenant, statt des Filters eine Gruppe mit allen Standard-Postfächern verwenden:
+`-RecipientRestrictionFilter "MemberOfGroup -eq '<DN der Gruppe>'"`. Änderungen können bis zu 2 Stunden dauern, bis sie wirken.
+
+### Modus „Senden als“: Absender freigeben
+
+Im Modus „Senden als“ meldet sich das Standard-Postfach (A) an, als Absender steht das Postfach aus der Mail (B) im
+Kopf. Exchange verschickt die Mail nur, wenn A das Recht „Senden als“ auf B hat:
+
+```powershell
+Add-RecipientPermission -Identity "b@firma.de" -Trustee "relay@firma.de" -AccessRights SendAs -Confirm:$false
+
+# Optional: Kopie zusätzlich in „Gesendete Elemente“ von B (sonst nur bei A)
+Set-Mailbox -Identity "b@firma.de" -MessageCopyForSentAsEnabled $true
+```
+
+Fehlt das Recht, steht im Verlauf der Mail `ErrorSendAsDenied`.
 
 ### Alternative: Berechtigungen in Entra + Application Access Policy
 
 `Mail.Send` und `Mail.ReadWrite` (Anwendung) in Entra erteilen, Administratorzustimmung geben, dann:
 
 ```powershell
-New-ApplicationAccessPolicy -AppId "<Client-ID>" -PolicyScopeGroupId "mailrelay-absender@firma.de" `
+New-ApplicationAccessPolicy -AppId "<Client-ID>" -PolicyScopeGroupId "relay@firma.de" `
     -AccessRight RestrictAccess -Description "Vemas.MailRelay"
 ```
 
@@ -221,10 +235,12 @@ setspn -S HTTP/mailrelay01.contoso.local CONTOSO\svc-mailrelay
 
 Weboberfläche: `http://<server>:8587/`
 
-1. **Profile → Neues Profil**: Tenant-ID, Client-ID, Client Secret, Ablaufdatum, Modus, Standard-Absender.
-   - **Fester Absender**: Jede Mail geht über das Standard-Postfach. Der ursprüngliche Absender wird zur Antwortadresse (Reply-To).
-   - **SendAs**: Der Absender aus der Mail wird übernommen, wenn er dem Standard-Absender oder einem Eintrag der Liste
-     *Erlaubte Absender* entspricht. Andere Absender werden schon beim SMTP-Eingang mit `5.7.1 Absender nicht erlaubt` abgewiesen.
+1. **Profile → Neues Profil**: Tenant-ID, Client-ID, Client Secret, Ablaufdatum, Modus, Standard-Postfach.
+   - **Fester Absender**: Jede Mail geht über das Standard-Postfach und mit ihm als Absender. Der ursprüngliche
+     Absender wird zur Antwortadresse (Reply-To).
+   - **Senden als**: Jede Mail geht über das Standard-Postfach (A), als Absender bleibt die Adresse aus der Mail (B)
+     stehen. A braucht in Exchange „Senden als“ auf B (Abschnitt 2). Die Liste *Erlaubte Absender* filtert zusätzlich
+     schon beim SMTP-Eingang: Andere Absender werden mit `5.7.1 Absender nicht erlaubt` abgewiesen.
 2. **Testmail senden** auf der Profilseite – prüft Anmeldung und Exchange-Berechtigung. Ergebnis im Verlauf.
 3. **SMTP-Benutzer → Neuer Benutzer**: Login, Passwort (mind. 12 Zeichen), Profil, erlaubte IPs der SQL-/SSRS-Server.
    Ohne IP-Eintrag ist keine Anmeldung möglich.
@@ -319,6 +335,7 @@ UPDATE mailrelay.SmtpUser SET PasswordPlain = N'<neues Passwort>'               
 | `Client Secret kann auf diesem Server nicht entschlüsselt werden` | DB von anderem Server übernommen → Secret neu eintragen |
 | `MIME-Inhalt nicht mehr vorhanden` | Aufbewahrungsfrist abgelaufen, Neu senden nicht mehr möglich |
 | SMTP `535 Authentication failed` | Ereignisanzeige zeigt den Grund: Benutzer unbekannt/deaktiviert, IP nicht freigegeben, Passwort falsch |
-| SMTP `5.7.1 Absender nicht erlaubt` | Absender passt nicht zum SendAs-Profil → Liste *Erlaubte Absender* ergänzen |
+| SMTP `5.7.1 Absender nicht erlaubt` | Absender passt nicht zum Profil „Senden als“ → Liste *Erlaubte Absender* ergänzen |
+| `Graph 403 ErrorSendAsDenied` | Standard-Postfach hat kein „Senden als“-Recht auf den Absender → `Add-RecipientPermission` (Abschnitt 2) |
 | Dienst startet nicht, Fehler 1069 | Dienstkonto fehlt das Recht „Als Dienst anmelden“ |
 | Weboberfläche: 403 | Benutzer ist nicht in `Web:AdminGroup` (nach Gruppenänderung neu anmelden) |

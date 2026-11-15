@@ -44,21 +44,23 @@ public static class MessagePreparer
         return sender;
     }
 
+    /// <summary>
+    /// "Senden als": Versand immer über das Standard-Postfach des Profils (Konto A), der Absender aus der
+    /// Mail (Konto B) bleibt im Kopf stehen. Exchange prüft, ob A das Recht "Senden als" auf B hat.
+    /// </summary>
     private static string ApplySendAs(MimeMessage message, RelayProfile profile)
     {
         var from = message.From.Mailboxes.FirstOrDefault();
         if (from is null)
         {
             message.From.Add(MailboxAddress.Parse(profile.DefaultSender));
-            return profile.DefaultSender;
         }
-
-        if (!SenderPolicy.IsAllowed(profile, from.Address))
+        else if (!SenderPolicy.IsAllowed(profile, from.Address))
         {
             throw new PermanentSendException($"Absender '{from.Address}' ist für Profil '{profile.Name}' nicht erlaubt.");
         }
 
-        return from.Address;
+        return profile.DefaultSender;
     }
 
     /// <summary>
