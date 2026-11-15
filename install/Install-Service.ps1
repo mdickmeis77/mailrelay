@@ -4,7 +4,12 @@
     Installiert oder aktualisiert den Windows-Dienst Vemas.MailRelay.
 
 .DESCRIPTION
-    - kopiert Vemas.MailRelay.exe (und appsettings.json, falls am Ziel noch keine existiert)
+    Üblicher Ablauf: den kompletten publish-Ordner (EXE, appsettings.json, Skripte) auf den Server
+    kopieren, z.B. nach C:\VemasDienste\VemasMailRelay, und das Skript dort ausführen.
+    Der Dienst läuft dann direkt aus diesem Ordner - es wird nichts kopiert.
+
+    - bestimmt Quell- und Dienstordner (siehe -SourcePath / -InstallPath)
+    - kopiert Vemas.MailRelay.exe nur, wenn -InstallPath ein anderer Ordner ist
     - registriert die Ereignisquelle "Vemas.MailRelay" im Anwendungsprotokoll
     - legt den Dienst an (Autostart, Dienstkonto) bzw. aktualisiert ihn
     - konfiguriert automatischen Neustart nach Absturz
@@ -20,8 +25,22 @@
 .PARAMETER SmtpAllowedRemoteAddress
     Optional: IPs/Netze, die den SMTP-Port erreichen dürfen (Firewall), z.B. "10.0.0.5","10.0.1.0/24".
 
+.PARAMETER SourcePath
+    Ordner mit Vemas.MailRelay.exe. Standard: Ordner des Skripts, falls die EXE dort liegt, sonst ..\publish.
+
+.PARAMETER InstallPath
+    Ordner, aus dem der Dienst läuft. Standard: Ordner des Skripts, falls die EXE dort liegt,
+    sonst "C:\Program Files\Vemas.MailRelay".
+
 .EXAMPLE
+    # Skript liegt neben der EXE in C:\VemasDienste\VemasMailRelay - Dienst läuft aus diesem Ordner
+    cd C:\VemasDienste\VemasMailRelay
     .\Install-Service.ps1 -ServiceAccount "CONTOSO\svc-mailrelay" -SmtpAllowedRemoteAddress "10.0.0.5","10.0.0.6"
+
+.EXAMPLE
+    # Ordner ausdrücklich angeben (z.B. aus einem Download-Ordner in den Dienstordner kopieren)
+    .\Install-Service.ps1 -ServiceAccount "CONTOSO\svc-mailrelay" -SmtpAllowedRemoteAddress "10.0.0.5" `
+        -SourcePath "D:\Download\MailRelay" -InstallPath "C:\VemasDienste\VemasMailRelay"
 #>
 [CmdletBinding()]
 param(

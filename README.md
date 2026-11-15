@@ -113,7 +113,9 @@ Das Dienstkonto erhält nur `SELECT, INSERT, UPDATE, DELETE, EXECUTE` auf das Sc
 dotnet publish src/Vemas.MailRelay -c Release -o publish
 ```
 
-Ergebnis im Ordner `publish`: `Vemas.MailRelay.exe` (self-contained, win-x64) und `appsettings.json`.
+Ergebnis im Ordner `publish`: `Vemas.MailRelay.exe` (self-contained, win-x64), `appsettings.json`,
+`Install-Service.ps1`, `Uninstall-Service.ps1` und `Install-Database.sql`. Diesen Ordner komplett auf den
+Server kopieren, z.B. nach `C:\VemasDienste\VemasMailRelay`.
 
 ## 5. Dienst installieren
 
@@ -125,7 +127,7 @@ Ergebnis im Ordner `publish`: `Vemas.MailRelay.exe` (self-contained, win-x64) un
 
 ### appsettings.json
 
-Beim ersten Installieren wird `appsettings.json` nach `C:\Program Files\Vemas.MailRelay` kopiert. Anzupassen:
+Die `appsettings.json` neben der EXE im Dienstordner anpassen:
 
 | Schlüssel | Bedeutung |
 |---|---|
@@ -141,22 +143,41 @@ Beim ersten Installieren wird `appsettings.json` nach `C:\Program Files\Vemas.Ma
 | `Maintenance:LogRetentionDays` | Protokoll löschen nach, Standard 365 Tage |
 | `Maintenance:SecretExpiryWarningDays` | Warnung vor Secret-Ablauf, Standard 30 Tage |
 
-Bei Updates bleibt eine vorhandene `appsettings.json` unverändert.
+Bei Updates die vorhandene `appsettings.json` nicht mit der aus dem publish-Ordner überschreiben.
 
 ### Installation
 
-PowerShell **als Administrator**:
+PowerShell **als Administrator**, im Dienstordner auf dem Server:
 
 ```powershell
-.\install\Install-Service.ps1 -ServiceAccount "CONTOSO\svc-mailrelay" `
-    -SmtpAllowedRemoteAddress "10.0.0.5","10.0.0.6"
+cd C:\VemasDienste\VemasMailRelay
+.\Install-Service.ps1 -ServiceAccount "CONTOSO\svc-mailrelay" -SmtpAllowedRemoteAddress "10.0.0.5","10.0.0.6"
 ```
 
-Das Skript kopiert die EXE, registriert die Ereignisquelle, legt den Dienst an (Autostart, Neustart nach
-Absturz), erstellt Firewall-Regeln und startet den Dienst. Für ein gMSA das Konto mit `$` angeben
+Liegt die EXE neben dem Skript, läuft der Dienst direkt aus diesem Ordner – es wird nichts kopiert.
+Die ersten Ausgaben zeigen, welche Ordner verwendet werden:
+
+```
+Quelle: C:\VemasDienste\VemasMailRelay
+Dienst läuft aus: C:\VemasDienste\VemasMailRelay
+```
+
+Andere Ordner lassen sich ausdrücklich angeben; dann kopiert das Skript die EXE (und beim ersten Mal die
+`appsettings.json`) von `-SourcePath` nach `-InstallPath`:
+
+```powershell
+.\Install-Service.ps1 -ServiceAccount "CONTOSO\svc-mailrelay" -SmtpAllowedRemoteAddress "10.0.0.5" `
+    -SourcePath "D:\Download\MailRelay" -InstallPath "C:\VemasDienste\VemasMailRelay"
+```
+
+Das Skript registriert die Ereignisquelle, legt den Dienst an (Autostart, Neustart nach Absturz), erstellt
+Firewall-Regeln und startet den Dienst. Für ein gMSA das Konto mit `$` angeben
 (`CONTOSO\gmsa-mailrelay$`) – dann wird kein Passwort abgefragt.
 
-Update: neue Version publizieren und dasselbe Skript erneut ausführen. Deinstallation: `.\install\Uninstall-Service.ps1 [-RemoveFiles]`.
+Update: Dienst stoppen (`Stop-Service Vemas.MailRelay` – die laufende EXE lässt sich nicht überschreiben),
+neue EXE in den Dienstordner kopieren (die `appsettings.json` behalten) und das Skript erneut ausführen;
+es startet den Dienst wieder.
+Deinstallation: `.\Uninstall-Service.ps1 [-RemoveFiles]`.
 
 ### Kerberos für die Weboberfläche (optional)
 
