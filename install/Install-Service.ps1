@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     Installiert oder aktualisiert den Windows-Dienst Vemas.MailRelay.
@@ -28,8 +28,13 @@ param(
     [Parameter(Mandatory)]
     [string]$ServiceAccount,
 
-    [string]$SourcePath = (Join-Path $PSScriptRoot '..\publish'),
-    [string]$InstallPath = (Join-Path $env:ProgramFiles 'Vemas.MailRelay'),
+    # Standard: Ordner des Skripts, falls die EXE dort liegt, sonst ..\publish (Repository-Struktur)
+    [string]$SourcePath,
+
+    # Standard: Liegt die EXE neben dem Skript, läuft der Dienst direkt aus diesem Ordner,
+    # sonst wird nach "C:\Program Files\Vemas.MailRelay" installiert.
+    [string]$InstallPath,
+
     [int]$SmtpPort = 587,
     [int]$WebPort = 8587,
     [string[]]$SmtpAllowedRemoteAddress = @('Any'),
@@ -39,12 +44,25 @@ param(
 $ErrorActionPreference = 'Stop'
 $serviceName = 'Vemas.MailRelay'
 $exeName = 'Vemas.MailRelay.exe'
+
+$exeNextToScript = Test-Path (Join-Path $PSScriptRoot $exeName)
+if (-not $SourcePath) {
+    $SourcePath = if ($exeNextToScript) { $PSScriptRoot } else { Join-Path $PSScriptRoot '..\publish' }
+}
+if (-not $InstallPath) {
+    $InstallPath = if ($exeNextToScript) { $PSScriptRoot } else { Join-Path $env:ProgramFiles 'Vemas.MailRelay' }
+}
+
 $sourceExe = Join-Path $SourcePath $exeName
 $targetExe = Join-Path $InstallPath $exeName
 
 if (-not (Test-Path $sourceExe)) {
-    throw "$exeName nicht gefunden in '$SourcePath'. Zuerst 'dotnet publish -c Release -o publish' ausführen oder -SourcePath angeben."
+    throw "$exeName nicht gefunden in '$SourcePath'. EXE neben das Skript legen oder -SourcePath angeben."
 }
+
+$installInPlace = (Resolve-Path $SourcePath).Path.TrimEnd('\') -eq [IO.Path]::GetFullPath($InstallPath).TrimEnd('\')
+Write-Host "Quelle: $SourcePath"
+Write-Host "Dienst läuft aus: $InstallPath"
 
 # 1. Laufenden Dienst stoppen (Update)
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
@@ -55,10 +73,16 @@ if ($service -and $service.Status -ne 'Stopped') {
 }
 
 # 2. Dateien kopieren - vorhandene appsettings.json bleibt erhalten
-New-Item -ItemType Directory -Force -Path $InstallPath | Out-Null
-Copy-Item $sourceExe $targetExe -Force
 $targetSettings = Join-Path $InstallPath 'appsettings.json'
-if (-not (Test-Path $targetSettings)) {
+if ($installInPlace) {
+    Write-Host "Installation am Ablageort - keine Dateien kopiert."
+    if (-not (Test-Path $targetSettings)) { throw "appsettings.json fehlt in '$InstallPath'." }
+}
+else {
+    New-Item -ItemType Directory -Force -Path $InstallPath | Out-Null
+    Copy-Item $sourceExe $targetExe -Force
+}
+if (-not $installInPlace -and -not (Test-Path $targetSettings)) {
     Copy-Item (Join-Path $SourcePath 'appsettings.json') $targetSettings
     Write-Warning "appsettings.json wurde neu angelegt - bitte ConnectionString und Web:AdminGroup anpassen: $targetSettings"
 }

@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     Entfernt den Windows-Dienst Vemas.MailRelay und dessen Firewall-Regeln.
