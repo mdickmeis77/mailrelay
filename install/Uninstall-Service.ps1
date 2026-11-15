@@ -1,5 +1,4 @@
-﻿#Requires -RunAsAdministrator
-<#
+﻿<#
 .SYNOPSIS
     Entfernt den Windows-Dienst Vemas.MailRelay und dessen Firewall-Regeln.
 
@@ -7,6 +6,7 @@
     Die Datenbank (Schema mailrelay) bleibt unangetastet.
     Mit -RemoveFiles werden zusätzlich Programmordner und Ereignisquelle entfernt.
 #>
+#Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
     [string]$InstallPath = (Join-Path $env:ProgramFiles 'Vemas.MailRelay'),

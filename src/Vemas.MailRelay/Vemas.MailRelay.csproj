@@ -37,9 +37,9 @@
     <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
-  <!-- Installationsskripte neben die EXE legen, damit der publish-Ordner komplett auf den Server kopiert werden kann -->
-  <ItemGroup>
-    <None Include="..\..\install\*.ps1;..\..\install\*.sql" Link="%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" CopyToOutputDirectory="Never" />
-  </ItemGroup>
+  <!-- Publish direkt in den Ordner install (neben die Installationsskripte), der komplett auf den Server kopiert wird -->
+  <PropertyGroup>
+    <PublishDir>$(MSBuildThisFileDirectory)..\..\install\</PublishDir>
+  </PropertyGroup>
 
 </Project>

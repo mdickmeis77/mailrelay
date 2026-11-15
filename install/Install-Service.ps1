@@ -1,5 +1,4 @@
-﻿#Requires -RunAsAdministrator
-<#
+﻿<#
 .SYNOPSIS
     Installiert oder aktualisiert den Windows-Dienst Vemas.MailRelay.
 
@@ -42,6 +41,7 @@
     .\Install-Service.ps1 -ServiceAccount "CONTOSO\svc-mailrelay" -SmtpAllowedRemoteAddress "10.0.0.5" `
         -SourcePath "D:\Download\MailRelay" -InstallPath "C:\VemasDienste\VemasMailRelay"
 #>
+#Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]

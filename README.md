@@ -110,12 +110,13 @@ Das Dienstkonto erhält nur `SELECT, INSERT, UPDATE, DELETE, EXECUTE` auf das Sc
 ## 4. EXE erstellen
 
 ```powershell
-dotnet publish src/Vemas.MailRelay -c Release -o publish
+dotnet publish src/Vemas.MailRelay -c Release
 ```
 
-Ergebnis im Ordner `publish`: `Vemas.MailRelay.exe` (self-contained, win-x64), `appsettings.json`,
-`Install-Service.ps1`, `Uninstall-Service.ps1` und `Install-Database.sql`. Diesen Ordner komplett auf den
-Server kopieren, z.B. nach `C:\VemasDienste\VemasMailRelay`.
+Das Ergebnis landet direkt im Ordner `install`, neben den Skripten: `Vemas.MailRelay.exe` (self-contained,
+win-x64), `appsettings.json`, `Install-Service.ps1`, `Uninstall-Service.ps1` und `Install-Database.sql`.
+Diesen Ordner komplett auf den Server kopieren, z.B. nach `C:\VemasDienste\VemasMailRelay`.
+EXE und `appsettings.json` im Ordner `install` sind von Git ausgenommen.
 
 ## 5. Dienst installieren
 
@@ -143,7 +144,7 @@ Die `appsettings.json` neben der EXE im Dienstordner anpassen:
 | `Maintenance:LogRetentionDays` | Protokoll löschen nach, Standard 365 Tage |
 | `Maintenance:SecretExpiryWarningDays` | Warnung vor Secret-Ablauf, Standard 30 Tage |
 
-Bei Updates die vorhandene `appsettings.json` nicht mit der aus dem publish-Ordner überschreiben.
+Bei Updates die vorhandene `appsettings.json` auf dem Server nicht mit der aus dem Ordner `install` überschreiben.
 
 ### Installation
 
