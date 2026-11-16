@@ -40,9 +40,9 @@ public sealed class EditModel : PageModel
 
     public async Task<IActionResult> OnPostAsync()
     {
-        foreach (string login in Input.GetLoginList().Where(l => !l.Contains('\\')))
+        foreach (string login in Input.GetLoginList().Where(l => l.Length > 256 || (l.Contains(' ') && !l.Contains('\\'))))
         {
-            ModelState.AddModelError("Input.Logins", $"„{login}“ ist kein Windows-Login (erwartet DOMAENE\\Konto).");
+            ModelState.AddModelError("Input.Logins", $"„{login}“ ist kein gültiger SQL-Server-Login.");
         }
 
         if (!ModelState.IsValid)

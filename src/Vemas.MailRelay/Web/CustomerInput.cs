@@ -17,7 +17,7 @@ public sealed class CustomerInput
     [RegularExpression(@"^[A-Za-z0-9_.-]+$", ErrorMessage = "Kurzname: nur Buchstaben, Ziffern, Punkt, Bindestrich, Unterstrich.")]
     public string ShortName { get; set; }
 
-    /// <summary>Ein Windows-Login bzw. eine Windows-Gruppe pro Zeile, z.B. DOMAENE\svc-nextgen-kunde.</summary>
+    /// <summary>Ein SQL-Server-Login pro Zeile (Windows-Konto, App-Pool-Identität, Windows-Gruppe oder SQL-Login).</summary>
     public string Logins { get; set; }
 
     public bool IsActive { get; set; } = true;

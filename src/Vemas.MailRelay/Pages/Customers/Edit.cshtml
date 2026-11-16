@@ -28,10 +28,11 @@
     </div>
 
     <div class="field">
-        <label asp-for="Input.Logins">Windows-Logins bzw. -Gruppen – einer pro Zeile</label>
+        <label asp-for="Input.Logins">SQL-Server-Logins der NextGen-Instanz – einer pro Zeile</label>
         <textarea asp-for="Input.Logins"></textarea>
         <span asp-validation-for="Input.Logins" class="error-text"></span>
-        <span class="hint">In der Regel das Konto, unter dem der App-Pool der NextGen-Instanz läuft, z.B. DOMAENE\svc-nextgen-kunde.
+        <span class="hint">Der Login, mit dem NextGen auf seine Datenbank zugreift: ein Windows-Konto (DOMAENE\svc-nextgen-kunde),
+            die App-Pool-Identität (IIS APPPOOL\NextGen bzw. DOMAENE\WEBSERVER$), eine Windows-Gruppe oder ein SQL-Login (vemas).
             Datenbank-Benutzer, Rechte und Synonyme richtet Add-Customer.sql ein.</span>
     </div>
 

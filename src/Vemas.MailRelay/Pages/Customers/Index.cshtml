@@ -5,7 +5,7 @@
 }
 
 <h1>Kunden</h1>
-<p class="muted">Kunden, die das Relay aus ihrer NextGen-Instanz nutzen. Erkannt wird ein Kunde am Windows-Login (App-Pool) seiner NextGen-Instanz.</p>
+<p class="muted">Kunden, die das Relay aus ihrer NextGen-Instanz nutzen. Erkannt wird ein Kunde am SQL-Server-Login, mit dem seine NextGen-Instanz auf die Datenbank zugreift.</p>
 
 <div class="actions">
     <a class="button primary" href="/Customers/Edit">Neuer Kunde</a>
@@ -14,7 +14,7 @@
 <div class="table-wrap">
     <table>
         <thead>
-            <tr><th>Name</th><th>Kurzname</th><th>Status</th><th>Windows-Logins</th><th>Profile</th></tr>
+            <tr><th>Name</th><th>Kurzname</th><th>Status</th><th>Logins</th><th>Profile</th></tr>
         </thead>
         <tbody>
             @foreach (var customer in Model.Customers)

@@ -6,8 +6,16 @@
 --   * Einzelinstallation: NextGen-Datenbank (Schema mailrelay liegt dort)
 -- Benötigt: db_owner in Relay- und NextGen-Datenbank (für CREATE LOGIN zusätzlich securityadmin).
 --
+-- @Login ist der SQL-Server-Login, mit dem NextGen auf seine Datenbank zugreift:
+--   * Windows-Konto des App-Pools ............ DOMAENE\svc-nextgen-muster
+--   * App-Pool-Identität, SQL lokal .......... IIS APPPOOL\<Poolname>
+--   * App-Pool-Identität, SQL entfernt ....... DOMAENE\<Webserver>$
+--   * SQL-Authentifizierung .................. Name des SQL-Logins aus dem Connection String
+-- Welcher Login es ist, zeigt (während NextGen läuft):
+--   SELECT DISTINCT login_name, program_name FROM sys.dm_exec_sessions WHERE database_id = DB_ID(N'<NextGen-DB>');
+--
 -- Das Skript ist wiederholbar. Es
---   1. legt den Kunden an und ordnet den Windows-Login des NextGen-App-Pools zu,
+--   1. legt den Kunden an und ordnet den Login der NextGen-Instanz zu,
 --   2. gibt dem Login Rechte nur auf die Kunden-Schnittstelle (Schema mailrelay_kunde),
 --      in der Cloud mit Prüfung: kein db_owner, kein sysadmin,
 --   3. legt in der NextGen-Datenbank das Schema mailrelay_ng mit Synonymen auf die Schnittstelle an.
@@ -21,7 +29,7 @@ SET XACT_ABORT ON;
 
 DECLARE @CustomerName NVARCHAR(200) = N'Musterkunde GmbH';           -- Anzeigename
 DECLARE @ShortName    NVARCHAR(50)  = N'MUSTER';                     -- Kurzname (erscheint im Verlauf)
-DECLARE @Login        SYSNAME       = N'DOMAENE\svc-nextgen-muster'; -- Windows-Login des NextGen-App-Pools
+DECLARE @Login        SYSNAME       = N'DOMAENE\svc-nextgen-muster'; -- Login der NextGen-Instanz (siehe oben)
 DECLARE @NextGenDb    SYSNAME       = N'NextGen_Muster';             -- NextGen-Datenbank des Kunden
 
 -- ------------------------------------------------------------
@@ -39,8 +47,13 @@ IF DB_ID(@NextGenDb) IS NULL
 
 IF SUSER_ID(@Login) IS NULL
 BEGIN
+    -- Nur Windows-Konten (DOMAENE\Konto, IIS APPPOOL\Pool) lassen sich ohne Passwort anlegen.
+    -- Ein SQL-Login muss bereits existieren - sonst ist der Name falsch.
+    IF CHARINDEX(N'\', @Login) = 0
+        THROW 50106, N'Der SQL-Login existiert auf diesem Server nicht. Bitte den Login eintragen, mit dem NextGen auf die Datenbank zugreift (siehe Abfrage im Kopf des Skripts).', 1;
+
     EXEC (N'CREATE LOGIN ' + N'[' + @Login + N'] FROM WINDOWS');
-    PRINT N'Login ' + @Login + N' angelegt.';
+    PRINT N'Windows-Login ' + @Login + N' angelegt.';
 END
 
 IF @IsCloud = 1 AND IS_SRVROLEMEMBER(N'sysadmin', @Login) = 1

@@ -150,7 +150,7 @@ Das Skript ist wiederholbar und legt an:
 | `mailrelay.Message` | Queue und Protokoll inkl. MIME-Inhalt |
 | `mailrelay.Attempt` | alle Versuche und manuellen Aktionen |
 | `mailrelay.Resend` / `Cancel` / `Cleanup` | Neu senden, Abbrechen, Aufräumen |
-| `mailrelay.Customer` / `CustomerLogin` | Kunden und ihre Windows-Logins (Kundenzugriff aus NextGen, Abschnitt 11) |
+| `mailrelay.Customer` / `CustomerLogin` | Kunden und die SQL-Server-Logins ihrer NextGen-Instanz (Kundenzugriff aus NextGen, Abschnitt 11) |
 | `mailrelay.TestMailRequest` | Testmail-Aufträge aus NextGen |
 | Row-Level Security `mailrelay.CustomerPolicy` | Datentrennung je Kunde |
 | Schema `mailrelay_kunde` | Views und Prozeduren für den Kundenzugriff |
@@ -359,7 +359,7 @@ Profile und SMTP-Benutzer ohne Kunde sind weiterhin nur in der Relay-Weboberflä
 
 ### Prinzip
 
-- Ein Kunde wird am **Windows-Login des App-Pools** seiner NextGen-Instanz erkannt (Tabelle `mailrelay.CustomerLogin`).
+- Ein Kunde wird am **SQL-Server-Login** erkannt, mit dem seine NextGen-Instanz auf die Datenbank zugreift (Tabelle `mailrelay.CustomerLogin`).
 - **Row-Level Security** in der Relay-Datenbank trennt die Daten. Sichtbar ist eine Zeile, wenn der Login zum Kunden
   der Zeile gehört, Mitglied von `mailrelay_service` ist (Relay-Dienst) oder db_owner der Relay-Datenbank ist.
 - Kunden-Logins erhalten nur `SELECT`/`EXECUTE` auf das Schema `mailrelay_kunde`, nie auf die Tabellen.
@@ -373,6 +373,29 @@ Profile und SMTP-Benutzer ohne Kunde sind weiterhin nur in der Relay-Weboberflä
 | Kunden-Login | darf in der Relay-DB **nicht** db_owner/sysadmin sein (Skript prüft) | ist meist db_owner und sieht alles (gewollt) |
 | NextGen-Paket | identisch | identisch |
 
+### Welcher Login?
+
+Einzutragen ist der Login, mit dem **NextGen** auf seine Datenbank zugreift – nicht der IIS-Benutzer an sich:
+
+| NextGen verbindet sich … | Login |
+|---|---|
+| mit Windows-Auth, App-Pool unter eigenem Konto (Cloud) | `DOMAENE\svc-nextgen-kunde` |
+| mit Windows-Auth, App-Pool-Identität, SQL auf demselben Server | `IIS APPPOOL\<Poolname>` |
+| mit Windows-Auth, App-Pool-Identität, SQL auf anderem Server | `DOMAENE\<Webserver>$` (Computerkonto) |
+| mit SQL-Authentifizierung (Benutzer/Passwort im Connection String) | Name des SQL-Logins, z.B. `vemas` |
+
+Welcher Login es ist, zeigt diese Abfrage, während NextGen läuft:
+
+```sql
+SELECT DISTINCT login_name, program_name
+  FROM sys.dm_exec_sessions
+ WHERE database_id = DB_ID(N'<NextGen-Datenbank>');
+```
+
+Bei einer **Einzelinstallation** ist der NextGen-Login in der Regel db_owner seiner Datenbank und sieht damit ohnehin
+alle Relay-Daten (es gibt nur einen Kunden). `Add-Customer.sql` wird trotzdem ausgeführt – es legt die Synonyme und
+Rechte an. Fehlende Windows-Logins legt das Skript an; ein SQL-Login muss bereits existieren.
+
 ### Einrichtung je Kunde
 
 1. `Install-Database.sql` in der aktuellen Version ausführen (einmalig, siehe Abschnitt 3).
@@ -380,7 +403,7 @@ Profile und SMTP-Benutzer ohne Kunde sind weiterhin nur in der Relay-Weboberflä
    ```sql
    DECLARE @CustomerName NVARCHAR(200) = N'Musterkunde GmbH';
    DECLARE @ShortName    NVARCHAR(50)  = N'MUSTER';                    -- erscheint im Verlauf
-   DECLARE @Login        SYSNAME       = N'CONTOSO\svc-nextgen-muster'; -- App-Pool-Konto der NextGen-Instanz
+   DECLARE @Login        SYSNAME       = N'CONTOSO\svc-nextgen-muster'; -- Login der NextGen-Instanz (siehe unten)
    DECLARE @NextGenDb    SYSNAME       = N'NextGen_Muster';
    ```
    Das Skript legt Kunde und Login-Zuordnung an, vergibt die Rechte und erzeugt die Synonyme in der NextGen-Datenbank.
@@ -403,7 +426,7 @@ FunctionFolder **Mail-Relay** (nur für NextGen-Administratoren, OpenPermission 
 | Profile | Profil bearbeiten (Name, Tenant, Client-ID, Standard-Postfach, „Senden als“, erlaubte Absender), Client Secret setzen, Testmail senden |
 | SMTP-Benutzer | nur lesend |
 
-Aktionen aus NextGen erscheinen im Verlauf als `<NextGen-Benutzer> (<Kurzname>) [<Windows-Login>]`.
+Aktionen aus NextGen erscheinen im Verlauf als `<NextGen-Benutzer> (<Kurzname>) [<Login>]`.
 Ein neues Client Secret landet im Klartextfeld und wird vom Dienst innerhalb einer Minute verschlüsselt.
 Profile anlegen, sperren und SMTP-Benutzer pflegen bleibt dem Hoster vorbehalten.
 
