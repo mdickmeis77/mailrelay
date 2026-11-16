@@ -208,6 +208,21 @@ BEGIN
 END
 GO
 
+-- Kunden des angemeldeten Logins (Login oder Windows-Gruppe, nur aktive Kunden).
+-- Die Schnittstelle filtert zusätzlich zur Row-Level Security explizit darauf: Auch ein Login,
+-- der als db_owner alle Daten sehen dürfte (Einzelinstallation), sieht hier nur seinen Kunden.
+CREATE OR ALTER FUNCTION mailrelay_kunde.fn_MeineKunden ()
+RETURNS TABLE
+AS
+RETURN
+    SELECT c.CustomerId
+      FROM mailrelay.Customer c
+     WHERE c.IsActive = 1
+       AND EXISTS (SELECT 1 FROM mailrelay.CustomerLogin cl
+                    WHERE cl.CustomerId = c.CustomerId
+                      AND (cl.LoginName = ORIGINAL_LOGIN() OR IS_MEMBER(cl.LoginName) = 1));
+GO
+
 -- Anzeigename für den Verlauf: "<NextGen-Benutzer> (<Kunde>) [<Windows-Login>]"
 CREATE OR ALTER FUNCTION mailrelay_kunde.fn_Benutzer (@Benutzer NVARCHAR(100))
 RETURNS NVARCHAR(256)
@@ -245,7 +260,8 @@ SELECT m.MessageId,
        m.ReceivedAt                                         AS EingangUtc
   FROM mailrelay.Message m
   LEFT JOIN mailrelay.Profile  p ON p.ProfileId  = m.ProfileId
-  LEFT JOIN mailrelay.SmtpUser u ON u.SmtpUserId = m.SmtpUserId;
+  LEFT JOIN mailrelay.SmtpUser u ON u.SmtpUserId = m.SmtpUserId
+ WHERE m.CustomerId IN (SELECT CustomerId FROM mailrelay_kunde.fn_MeineKunden());
 GO
 
 CREATE OR ALTER VIEW mailrelay_kunde.Verlauf
@@ -260,7 +276,9 @@ SELECT a.AttemptId,
        a.ErrorText                           AS Fehler,
        a.GraphRequestId                      AS RequestId,
        a.UserName                            AS Benutzer
-  FROM mailrelay.Attempt a;
+  FROM mailrelay.Attempt a
+  JOIN mailrelay.Message m ON m.MessageId = a.MessageId
+ WHERE m.CustomerId IN (SELECT CustomerId FROM mailrelay_kunde.fn_MeineKunden());
 GO
 
 CREATE OR ALTER VIEW mailrelay_kunde.Mail
@@ -277,7 +295,8 @@ SELECT m.MessageId,
        m.AttachmentNames AS Anhaenge,
        m.Status,
        mailrelay_kunde.fn_StatusText(m.Status) AS StatusText
-  FROM mailrelay.Message m;
+  FROM mailrelay.Message m
+ WHERE m.CustomerId IN (SELECT CustomerId FROM mailrelay_kunde.fn_MeineKunden());
 GO
 
 CREATE OR ALTER VIEW mailrelay_kunde.Profile
@@ -296,13 +315,16 @@ SELECT p.ProfileId,
        p.IsActive        AS Aktiv,
        (SELECT STRING_AGG(s.Pattern, NCHAR(10)) WITHIN GROUP (ORDER BY s.Pattern)
           FROM mailrelay.AllowedSender s WHERE s.ProfileId = p.ProfileId) AS ErlaubteAbsender
-  FROM mailrelay.Profile p;
+  FROM mailrelay.Profile p
+ WHERE p.CustomerId IN (SELECT CustomerId FROM mailrelay_kunde.fn_MeineKunden());
 GO
 
 CREATE OR ALTER VIEW mailrelay_kunde.ErlaubteAbsender
 AS
 SELECT s.AllowedSenderId, s.ProfileId, s.Pattern AS Muster
-  FROM mailrelay.AllowedSender s;
+  FROM mailrelay.AllowedSender s
+  JOIN mailrelay.Profile p ON p.ProfileId = s.ProfileId
+ WHERE p.CustomerId IN (SELECT CustomerId FROM mailrelay_kunde.fn_MeineKunden());
 GO
 
 CREATE OR ALTER VIEW mailrelay_kunde.SmtpBenutzer
@@ -314,7 +336,8 @@ SELECT u.SmtpUserId,
        u.ProfileId,
        p.Name AS Profil
   FROM mailrelay.SmtpUser u
-  LEFT JOIN mailrelay.Profile p ON p.ProfileId = u.ProfileId;
+  JOIN mailrelay.Profile p ON p.ProfileId = u.ProfileId
+ WHERE p.CustomerId IN (SELECT CustomerId FROM mailrelay_kunde.fn_MeineKunden());
 GO
 
 CREATE OR ALTER VIEW mailrelay_kunde.Testauftraege
@@ -332,7 +355,8 @@ SELECT t.TestMailRequestId,
        COALESCE(t.ErrorText, m.LastError) AS Fehler
   FROM mailrelay.TestMailRequest t
   LEFT JOIN mailrelay.Profile p ON p.ProfileId = t.ProfileId
-  LEFT JOIN mailrelay.Message m ON m.MessageId = t.MessageId;
+  LEFT JOIN mailrelay.Message m ON m.MessageId = t.MessageId
+ WHERE t.CustomerId IN (SELECT CustomerId FROM mailrelay_kunde.fn_MeineKunden());
 GO
 
 CREATE OR ALTER PROCEDURE mailrelay_kunde.NeuSenden
@@ -341,6 +365,8 @@ CREATE OR ALTER PROCEDURE mailrelay_kunde.NeuSenden
 AS
 BEGIN
     SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM mailrelay_kunde.Protokoll WHERE MessageId = @MessageId)
+        THROW 50003, N'Mail nicht gefunden.', 1;
     DECLARE @user NVARCHAR(256) = mailrelay_kunde.fn_Benutzer(@Benutzer);
     DECLARE @ok INT;
     EXEC @ok = mailrelay.Resend @MessageId = @MessageId, @UserName = @user;
@@ -355,6 +381,8 @@ CREATE OR ALTER PROCEDURE mailrelay_kunde.Abbrechen
 AS
 BEGIN
     SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM mailrelay_kunde.Protokoll WHERE MessageId = @MessageId)
+        THROW 50003, N'Mail nicht gefunden.', 1;
     DECLARE @user NVARCHAR(256) = mailrelay_kunde.fn_Benutzer(@Benutzer);
     DECLARE @ok INT;
     EXEC @ok = mailrelay.Cancel @MessageId = @MessageId, @UserName = @user;
@@ -378,6 +406,8 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    IF NOT EXISTS (SELECT 1 FROM mailrelay_kunde.Profile WHERE ProfileId = @ProfileId)
+        THROW 50014, N'Profil nicht gefunden.', 1;
     IF NULLIF(LTRIM(RTRIM(@Name)), N'') IS NULL OR NULLIF(LTRIM(RTRIM(@TenantId)), N'') IS NULL
         THROW 50010, N'Name und Tenant-ID sind Pflichtfelder.', 1;
     IF TRY_CONVERT(UNIQUEIDENTIFIER, @ClientId) IS NULL
@@ -425,6 +455,8 @@ CREATE OR ALTER PROCEDURE mailrelay_kunde.SecretSetzen
 AS
 BEGIN
     SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM mailrelay_kunde.Profile WHERE ProfileId = @ProfileId)
+        THROW 50021, N'Profil nicht gefunden.', 1;
     IF NULLIF(LTRIM(RTRIM(@Secret)), N'') IS NULL
         THROW 50020, N'Bitte ein Client Secret eingeben.', 1;
 
@@ -450,7 +482,8 @@ BEGIN
         THROW 50030, N'Bitte eine gültige Empfängeradresse angeben.', 1;
 
     DECLARE @customerId INT, @found BIT = 0;
-    SELECT @customerId = CustomerId, @found = 1 FROM mailrelay.Profile WHERE ProfileId = @ProfileId;
+    SELECT @customerId = CustomerId, @found = 1 FROM mailrelay.Profile
+     WHERE ProfileId = @ProfileId AND CustomerId IN (SELECT CustomerId FROM mailrelay_kunde.fn_MeineKunden());
     IF @found = 0
         THROW 50031, N'Profil nicht gefunden.', 1;
 

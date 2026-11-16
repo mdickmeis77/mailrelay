@@ -378,6 +378,9 @@ Profile und SMTP-Benutzer ohne Kunde sind weiterhin nur in der Relay-Weboberflä
 - **Row-Level Security** in der Relay-Datenbank trennt die Daten. Sichtbar ist eine Zeile, wenn der Login zum Kunden
   der Zeile gehört, Mitglied von `mailrelay_service` ist (Relay-Dienst) oder db_owner der Relay-Datenbank ist.
 - Kunden-Logins erhalten nur `SELECT`/`EXECUTE` auf das Schema `mailrelay_kunde`, nie auf die Tabellen.
+- Die Kunden-Schnittstelle `mailrelay_kunde` filtert zusätzlich **explizit** auf den Kunden des angemeldeten Logins.
+  Auch ein Login, der als db_owner alle Tabellen sehen dürfte (Einzelinstallation), sieht in NextGen nur die Daten
+  seines Kunden – Mails von Profilen ohne Kunde (z.B. des Hosters) erscheinen dort nicht.
 - In der NextGen-Datenbank legt `Add-Customer.sql` das Schema `mailrelay_ng` mit Synonymen (`rk_*`) auf die
   Kunden-Schnittstelle an; das NextGen-Paket nutzt nur diese Synonyme.
 
@@ -385,7 +388,7 @@ Profile und SMTP-Benutzer ohne Kunde sind weiterhin nur in der Relay-Weboberflä
 |---|---|---|
 | Schema `mailrelay` | eigene Relay-Datenbank | in der NextGen-Datenbank |
 | Synonyme `mailrelay_ng.rk_*` | zeigen auf die Relay-Datenbank | zeigen auf dieselbe Datenbank |
-| Kunden-Login | darf in der Relay-DB **nicht** db_owner/sysadmin sein (Skript prüft) | ist meist db_owner und sieht alles (gewollt) |
+| Kunden-Login | darf in der Relay-DB **nicht** db_owner/sysadmin sein, sobald es mehrere Kunden gibt (Skript prüft) | ist meist db_owner; NextGen zeigt trotzdem nur die Daten des Kunden |
 | NextGen-Paket | identisch | identisch |
 
 ### Welcher Login?
@@ -407,9 +410,9 @@ SELECT DISTINCT login_name, program_name
  WHERE database_id = DB_ID(N'<NextGen-Datenbank>');
 ```
 
-Bei einer **Einzelinstallation** ist der NextGen-Login in der Regel db_owner seiner Datenbank und sieht damit ohnehin
-alle Relay-Daten (es gibt nur einen Kunden). `Add-Customer.sql` wird trotzdem ausgeführt – es legt die Synonyme und
-Rechte an. Fehlende Windows-Logins legt das Skript an; ein SQL-Login muss bereits existieren.
+Bei einer **Einzelinstallation** ist der NextGen-Login in der Regel db_owner seiner Datenbank. Direkt auf die Tabellen
+sieht er damit alle Relay-Daten, in NextGen aber nur die seines Kunden. `Add-Customer.sql` ist deshalb Pflicht – es
+legt die Login-Zuordnung, die Synonyme und die Rechte an. Fehlende Windows-Logins legt das Skript an; ein SQL-Login muss bereits existieren.
 
 ### Einrichtung je Kunde
 
@@ -436,6 +439,7 @@ FunctionFolder **Mail-Relay** (nur für NextGen-Administratoren, OpenPermission 
 
 | Eintrag | Funktionen |
 |---|---|
+| Übersicht | Dashboard: Kacheln (heute gesendet, Warteschlange, fehlgeschlagen in 7 Tagen, Profile mit fehlendem/ablaufendem Client Secret), Diagramm der letzten 14 Tage, Liste offener und fehlgeschlagener Mails mit denselben Aktionen wie das Protokoll |
 | Protokoll | Mails der letzten 30 Tage (Zeitraum einstellbar); Mail anzeigen (Kopfdaten, Text, Anhangsnamen), Verlauf, Neu senden, Versand abbrechen |
 | Testmails | angeforderte Testmails mit Ergebnis |
 | Profile | Profil bearbeiten (Name, Tenant, Client-ID, Standard-Postfach, „Senden als“, erlaubte Absender), Client Secret setzen, Testmail senden |

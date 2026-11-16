@@ -7,7 +7,8 @@
 --
 -- Inhalt:
 --   * Prozeduren mailrelay_ng.* für Datasources und Aktionen
---   * Datasources MAILRELAY_*, Spalten, Parameter, Aktionen
+--   * Datasources MAILRELAY_*, Spalten, Parameter, Aktionen, Infosources für die Kacheln
+--   * Dashboard MAILRELAY.DASHBOARD ("Mail-Relay Übersicht")
 --   * Formulare MAILRELAY.PROFIL, MAILRELAY.SECRET, MAILRELAY.TESTMAIL
 --   * NavigatorFunctions, FunctionFolder "MailRelay", Navigator-Eintrag
 --   * Übersetzungen Deutsch/Englisch (Präfix MAILRELAY.)
@@ -121,6 +122,110 @@ BEGIN
 END
 GO
 
+-- ---------- Dashboard ----------
+-- Offene und fehlgeschlagene Mails (Liste im Dashboard, gleiche Spalten und Aktionen wie das Protokoll)
+CREATE OR ALTER PROCEDURE mailrelay_ng.Probleme
+    @currentagent NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @ab DATETIME2(3) = DATEADD(DAY, -7, SYSUTCDATETIME());
+
+    SELECT MessageId AS _ObjID,
+           MessageId, Eingang, StatusText AS Status, Status AS StatusCode,
+           Absender, Empfaenger, Betreff,
+           CAST(GroesseBytes / 1024.0 AS DECIMAL(12, 1)) AS GroesseKB,
+           Versuche, Gesendet, NaechsterVersuch, LetzterFehler,
+           Profil, SmtpBenutzer, InhaltVorhanden
+      FROM mailrelay_ng.rk_Protokoll
+     WHERE Status IN ('Queued', 'Sending', 'Retry')
+        OR (Status = 'Failed' AND EingangUtc >= @ab)
+     ORDER BY MessageId DESC;
+END
+GO
+
+-- Mails je Tag und Ergebnis (Diagramm): arg = Tag, GROUP = Serie
+CREATE OR ALTER PROCEDURE mailrelay_ng.DashboardTage
+    @currentagent NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @ab DATETIME2(3) = DATEADD(DAY, -14, SYSUTCDATETIME());
+
+    SELECT CAST(Eingang AS DATE) AS arg,
+           COUNT(*)              AS Value,
+           Serie                 AS [GROUP],
+           MIN(Farbe)            AS Color
+      FROM mailrelay_ng.rk_Protokoll
+     CROSS APPLY (SELECT CASE Status
+                             WHEN 'Sent'      THEN N'MAILRELAY.CHART.GESENDET'
+                             WHEN 'Failed'    THEN N'MAILRELAY.CHART.FEHLGESCHLAGEN'
+                             WHEN 'Cancelled' THEN N'MAILRELAY.CHART.ABGEBROCHEN'
+                             ELSE N'MAILRELAY.CHART.OFFEN' END AS Serie,
+                         CASE Status
+                             WHEN 'Sent'      THEN '#2E7D32'
+                             WHEN 'Failed'    THEN '#C62828'
+                             WHEN 'Cancelled' THEN '#9E9E9E'
+                             ELSE '#F9A825' END AS Farbe) s
+     WHERE EingangUtc >= @ab
+     GROUP BY CAST(Eingang AS DATE), Serie
+     ORDER BY arg, [GROUP];
+END
+GO
+
+-- Kacheln (Infosources): Value = große Zahl, Count = Zusatzzahl im Text
+CREATE OR ALTER PROCEDURE mailrelay_ng.KachelGesendet
+    @CurrentUser NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @heute DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE N'W. Europe Standard Time' AS DATE);
+    SELECT COUNT(CASE WHEN CAST(Gesendet AS DATE) = @heute THEN 1 END) AS [Value],
+           COUNT(*)                                                    AS [Count]
+      FROM mailrelay_ng.rk_Protokoll
+     WHERE Status = 'Sent' AND Gesendet >= DATEADD(DAY, -6, @heute);
+END
+GO
+
+CREATE OR ALTER PROCEDURE mailrelay_ng.KachelWarteschlange
+    @CurrentUser NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*)                                  AS [Value],
+           COUNT(CASE WHEN Status = 'Retry' THEN 1 END) AS [Count]
+      FROM mailrelay_ng.rk_Protokoll
+     WHERE Status IN ('Queued', 'Sending', 'Retry');
+END
+GO
+
+CREATE OR ALTER PROCEDURE mailrelay_ng.KachelFehler
+    @CurrentUser NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @heute DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE N'W. Europe Standard Time' AS DATE);
+    SELECT COUNT(*)                                                   AS [Value],
+           COUNT(CASE WHEN CAST(Eingang AS DATE) = @heute THEN 1 END) AS [Count]
+      FROM mailrelay_ng.rk_Protokoll
+     WHERE Status = 'Failed' AND Eingang >= DATEADD(DAY, -6, @heute);
+END
+GO
+
+CREATE OR ALTER PROCEDURE mailrelay_ng.KachelProfile
+    @CurrentUser NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @heute DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE N'W. Europe Standard Time' AS DATE);
+    SELECT COUNT(CASE WHEN SecretHinterlegt = 0 AND SecretWirdVerarbeitet = 0 THEN 1
+                      WHEN SecretGueltigBis < DATEADD(DAY, 30, @heute) THEN 1 END) AS [Value],
+           COUNT(*)                                                                AS [Count]
+      FROM mailrelay_ng.rk_Profile
+     WHERE Aktiv = 1;
+END
+GO
+
 -- ============================================================
 -- 2. Prozeduren für die Aktionen (Aufruf über formapicall/GenericExecuteSP)
 -- ============================================================
@@ -216,6 +321,7 @@ DELETE FROM vngSys.NavigatorFunctions   WHERE FunctionName LIKE N'MailRelay%' OR
 DELETE i FROM vngSys.FunctionFolderItems  i JOIN vngSys.FunctionFolders f ON f.Guid = i.FunctionFolderGuid WHERE f.FolderName = N'MailRelay';
 DELETE g FROM vngSys.FunctionFolderGroups g JOIN vngSys.FunctionFolders f ON f.Guid = g.FunctionFolderGuid WHERE f.FolderName = N'MailRelay';
 DELETE FROM vngSys.FunctionFolders      WHERE FolderName = N'MailRelay';
+DELETE FROM vngSys.Infosources          WHERE Name LIKE N'MAILRELAY[_]%';
 
 -- ---------- Datasources ----------
 INSERT INTO vngSys.Datasources (DatasourceName, SPName, Type, SortGroupParameters, DataSourceProperties, CacheBehavior, SecurityParameters, Comment)
@@ -225,7 +331,19 @@ VALUES
     (N'MAILRELAY_MAIL',         N'mailrelay_ng.Mail',          N'Datagrid', @Grid, @Props, 0, @Security, N'Vemas.MailRelay'),
     (N'MAILRELAY_PROFILE',      N'mailrelay_ng.Profile',       N'Datagrid', @Grid, @Props, 0, @Security, N'Vemas.MailRelay'),
     (N'MAILRELAY_SMTPBENUTZER', N'mailrelay_ng.SmtpBenutzer',  N'Datagrid', @Grid, @Props, 0, @Security, N'Vemas.MailRelay'),
-    (N'MAILRELAY_TESTMAILS',    N'mailrelay_ng.Testauftraege', N'Datagrid', @Grid, @Props, 0, @Security, N'Vemas.MailRelay');
+    (N'MAILRELAY_TESTMAILS',    N'mailrelay_ng.Testauftraege', N'Datagrid', @Grid, @Props, 0, @Security, N'Vemas.MailRelay'),
+    (N'MAILRELAY_PROBLEME',     N'mailrelay_ng.Probleme',      N'Datagrid', @Grid, @Props, 0, @Security, N'Vemas.MailRelay'),
+    (N'MAILRELAY_CHART_TAGE',   N'mailrelay_ng.DashboardTage', N'XYChart',  @Grid,
+     N'{"ChartType":"stackedbar","ChartSettings":{"ShowTitle":false,"ShowExportButton":false,"SeriesTextTemplate":"{{translate data.seriesText}}","ValueAxisTitle":"MAILRELAY.CHART.ANZAHL","ArgumentField":"arg","PointToolTipTemplate":"{{translate data.seriesText}}: {{ data.valueText }}","SeriesCustomisationExpressions":{"MAILRELAY.CHART.GESENDET":"{''color'': ''#2E7D32''}","MAILRELAY.CHART.FEHLGESCHLAGEN":"{''color'': ''#C62828''}","MAILRELAY.CHART.ABGEBROCHEN":"{''color'': ''#9E9E9E''}","MAILRELAY.CHART.OFFEN":"{''color'': ''#F9A825''}"},"AnnotationTemplate":{"type":"text"},"Aggregations":[],"Legend":{"VerticalPosition":"bottom","HorizontalPosition":"center"},"ArgumentAxis":{"DisplayStringTemplate":"{{ formatDate data.value currentInterval.dataFormat }}","DataType":"datetime","DefaultInterval":"day","Intervals":{"day":{"DataFormat":"Date"}}}},"DrillDownSettings":{},"CacheMethod":"FileSystem","LegacyModeSettings":{"IgnoreNullAllParameters":false},"ReloadDataSettings":{"ReloadOnActivation":true}}',
+     0, @Security, N'Vemas.MailRelay');
+
+-- Kacheln des Dashboards
+INSERT INTO vngSys.Infosources (Name, SPName, Guid, CacheBehavior, SecurityParameters, Comment)
+VALUES
+    (N'MAILRELAY_KACHEL_GESENDET',      N'mailrelay_ng.KachelGesendet',      NEWID(), 0, @Security, N'Vemas.MailRelay'),
+    (N'MAILRELAY_KACHEL_WARTESCHLANGE', N'mailrelay_ng.KachelWarteschlange', NEWID(), 0, @Security, N'Vemas.MailRelay'),
+    (N'MAILRELAY_KACHEL_FEHLER',      N'mailrelay_ng.KachelFehler',        NEWID(), 0, @Security, N'Vemas.MailRelay'),
+    (N'MAILRELAY_KACHEL_PROFILE',     N'mailrelay_ng.KachelProfile',       NEWID(), 0, @Security, N'Vemas.MailRelay');
 
 INSERT INTO vngSys.DatasourceParameters (DatasourceName, ParameterName, UIType, Caption, Required, Hidden, OrderID)
 VALUES
@@ -293,6 +411,11 @@ SELECT d, c, N'MAILRELAY.COL.' + UPPER(c), v, o, w, N'{"ShowClearButton":false}'
     (N'MAILRELAY_TESTMAILS', N'Fehler',           1,  70,  -1, 0)
   ) x (d, c, v, o, w, p);
 
+-- Dashboard-Liste: gleiche Spalten wie das Protokoll
+INSERT INTO vngSys.DatasourceColumns (DatasourceName, ColumnName, Caption, IsVisible, OrderID, Width, EditParameters, SortGroupParameters)
+SELECT N'MAILRELAY_PROBLEME', ColumnName, Caption, IsVisible, OrderID, Width, EditParameters, SortGroupParameters
+  FROM vngSys.DatasourceColumns WHERE DatasourceName = N'MAILRELAY_PROTOKOLL';
+
 -- ---------- Aktionen im Protokoll ----------
 DECLARE @ApiPrefix NVARCHAR(200) = N'Options[Caption=YES].Commands[Command=ApiCall].';
 
@@ -314,6 +437,11 @@ VALUES
  N'{"ResultType":"Command","Command":"Decision","Title":"MAILRELAY.CONFIRM.TITLE","Message":"MAILRELAY.CONFIRM.ABBRECHEN","Options":[{"Caption":"YES","Icon":"check","ShowInFooter":true,"Commands":[{"ResultType":"Command","Command":"ApiCall","EndPoint":"formapicall/GenericExecuteSP","Body":{"SPName":"mailrelay_ng.Abbrechen","Parameters":[{"Name":"MessageId","Value":null},{"Name":"Benutzer","Value":null}],"RefreshAfterExecute":true},"CallerInstanceName":null}]},{"Caption":"NO","Icon":"times","ShowInFooter":true}]}',
  N'[{"Parameter":"' + @ApiPrefix + N'Body.Parameters[Name=MessageId].Value","ColumnName":"MessageId","Required":false},{"Parameter":"' + @ApiPrefix + N'Body.Parameters[Name=Benutzer].Value","KeyValue":"currentUser","Required":false},{"Parameter":"' + @ApiPrefix + N'CallerInstanceName","KeyValue":"FormInstanceName","Required":false}]',
  N'{"IsRowAction":true,"IsDefaultAction":false,"ShowCaptionWhenSeparate":false,"MoreOptionsPriority":0,"_useDynamicPositioning":false,"Selector":"Single","SelectorExpr":"data.statuscode in [\"Queued\",\"Retry\"]"}');
+
+-- Dashboard-Liste: gleiche Aktionen wie das Protokoll
+INSERT INTO vngSys.DatasourceActions (DatasourceName, ActionName, Caption, Icon, Command, CommandParameters, PositionParameters)
+SELECT N'MAILRELAY_PROBLEME', ActionName, Caption, Icon, Command, CommandParameters, PositionParameters
+  FROM vngSys.DatasourceActions WHERE DatasourceName = N'MAILRELAY_PROTOKOLL';
 
 -- ---------- Aktionen bei den Profilen ----------
 INSERT INTO vngSys.DatasourceActions (DatasourceName, ActionName, Caption, Icon, Command, CommandParameters, PositionParameters)
@@ -383,9 +511,45 @@ VALUES
  N'[{"Parameter":"Body.Parameters[Name=ProfileId].Value","DataField":"profileid","Relative":false},{"Parameter":"Body.Parameters[Name=Empfaenger].Value","DataField":"empfaenger","Relative":false},{"Parameter":"Body.Parameters[Name=Benutzer].Value","KeyValue":"currentUser"},{"Parameter":"CallerInstanceName","KeyValue":"CallerInstanceName"},{"Parameter":"InstanceName","KeyValue":"FormInstanceName"}]',
  @DialogAction);
 
+-- ---------- Dashboard (Formular ohne Entität: Kacheln, Diagramm, offene/fehlgeschlagene Mails) ----------
+DECLARE @Tile NVARCHAR(MAX) = N'{"valueTemplateString":null,"iconTemplateString":"#ICON#","caption":"#CAPTION#","body":"#BODY#","cssClassTemplateString":"#CSS#","cssStyleTemplate":null,"loadingPanel":true,"tooltip":null,"helptext":null,"readOnly":false,"readOnlyExpr":null,"preventRenderingExpr":null,"preventRendering":false,"hidden":false,"hiddenExpr":null,"valueExpr":null,"height":"120px","minHeight":null,"maxHeight":null,"itemHeight":null,"horizontalAlignment":null,"alignLabelRight":false,"placeholderWhenHidden":false,"initialFocus":false,"cssClass":null,"ignoreReadingMode":false}';
+DECLARE @Card NVARCHAR(MAX) = N'{"hideNavigationButton":false,"collapsed":false,"mask":#MASK#,"entityFieldExpr":null,"tooltip":null,"helptext":null,"readOnly":false,"readOnlyExpr":null,"preventRenderingExpr":null,"preventRendering":false,"hidden":false,"hiddenExpr":null,"valueExpr":null,"height":null,"minHeight":null,"maxHeight":null,"itemHeight":null,"horizontalAlignment":null,"alignLabelRight":false,"placeholderWhenHidden":false,"initialFocus":false,"cssClass":null,"ignoreReadingMode":false}';
+DECLARE @Report NVARCHAR(MAX) = N'{"dragDrop":null,"dataSourceSettings":null,"preventLoadingExpr":null,"observedFormDataFields":null,"initialFocusedRowIndex":null,"tooltip":null,"helptext":null,"readOnly":false,"readOnlyExpr":null,"preventRenderingExpr":null,"preventRendering":false,"hidden":false,"hiddenExpr":null,"valueExpr":null,"height":"#HEIGHT#","minHeight":null,"maxHeight":null,"itemHeight":null,"horizontalAlignment":null,"alignLabelRight":false,"placeholderWhenHidden":false,"initialFocus":false,"cssClass":null,"ignoreReadingMode":false}';
+DECLARE @WarnIfAny NVARCHAR(200) = N'{{#if (jsonata ''$asNumber(data.value) > 0'')}}warning{{else}}success{{/if}}';
+DECLARE @DangerIfAny NVARCHAR(200) = N'{{#if (jsonata ''$asNumber(data.value) > 0'')}}danger{{else}}success{{/if}}';
+
+DECLARE @d1 INT = vngSys.GetNewElementID(), @d2 INT = vngSys.GetNewElementID(), @d3 INT = vngSys.GetNewElementID(),
+        @k1 INT = vngSys.GetNewElementID(), @k2 INT = vngSys.GetNewElementID(), @k3 INT = vngSys.GetNewElementID(), @k4 INT = vngSys.GetNewElementID(),
+        @r1 INT = vngSys.GetNewElementID(), @r2 INT = vngSys.GetNewElementID();
+
+INSERT INTO vngSys.Forms (FormName, Caption, ChildFormElements, FormParameters, SecurityParameters, Comment)
+VALUES (N'MAILRELAY.DASHBOARD', N'MAILRELAY.FORM.DASHBOARD', CONCAT(N'[', @d1, N',', @d2, N',', @d3, N']'), @FormParams, @Security, N'Vemas.MailRelay');
+
+INSERT INTO vngSys.FormElements (FormName, ElementID, ElementType, Layout, ChildFormElements, Caption, Datasource, ElementProperties, UIProperties)
+VALUES
+    (N'MAILRELAY.DASHBOARD', @d1, N'card', N'{"Mask":[3,3,3,3]}', CONCAT(N'[', @k1, N',', @k2, N',', @k3, N',', @k4, N']'), NULL, NULL,
+     REPLACE(@Card, N'#MASK#', N'[3,3,3,3]'), @UI),
+    (N'MAILRELAY.DASHBOARD', @k1, N'tile', NULL, NULL, NULL, N'MAILRELAY_KACHEL_GESENDET',
+     REPLACE(REPLACE(REPLACE(REPLACE(@Tile, N'#ICON#', N'PAPER-PLANE'), N'#CAPTION#', N'MAILRELAY.TILE.GESENDET'), N'#BODY#', N'MAILRELAY.TILE.GESENDET.BODY'), N'#CSS#', N'success'), @UI),
+    (N'MAILRELAY.DASHBOARD', @k2, N'tile', NULL, NULL, NULL, N'MAILRELAY_KACHEL_WARTESCHLANGE',
+     REPLACE(REPLACE(REPLACE(REPLACE(@Tile, N'#ICON#', N'CLOCK'), N'#CAPTION#', N'MAILRELAY.TILE.WARTESCHLANGE'), N'#BODY#', N'MAILRELAY.TILE.WARTESCHLANGE.BODY'), N'#CSS#', @WarnIfAny), @UI),
+    (N'MAILRELAY.DASHBOARD', @k3, N'tile', NULL, NULL, NULL, N'MAILRELAY_KACHEL_FEHLER',
+     REPLACE(REPLACE(REPLACE(REPLACE(@Tile, N'#ICON#', N'STOP'), N'#CAPTION#', N'MAILRELAY.TILE.FEHLER'), N'#BODY#', N'MAILRELAY.TILE.FEHLER.BODY'), N'#CSS#', @DangerIfAny), @UI),
+    (N'MAILRELAY.DASHBOARD', @k4, N'tile', NULL, NULL, NULL, N'MAILRELAY_KACHEL_PROFILE',
+     REPLACE(REPLACE(REPLACE(REPLACE(@Tile, N'#ICON#', N'SYSLOCK'), N'#CAPTION#', N'MAILRELAY.TILE.PROFILE'), N'#BODY#', N'MAILRELAY.TILE.PROFILE.BODY'), N'#CSS#', @WarnIfAny), @UI),
+    (N'MAILRELAY.DASHBOARD', @d2, N'card', N'{"Mask":[12]}', CONCAT(N'[', @r1, N']'), NULL, NULL,
+     REPLACE(@Card, N'#MASK#', N'[12]'), @UI),
+    (N'MAILRELAY.DASHBOARD', @r1, N'report', NULL, NULL, N'MAILRELAY.DASHBOARD.TAGE', N'MAILRELAY_CHART_TAGE',
+     REPLACE(@Report, N'#HEIGHT#', N'320px'), @UI),
+    (N'MAILRELAY.DASHBOARD', @d3, N'card', N'{"Mask":[12]}', CONCAT(N'[', @r2, N']'), NULL, NULL,
+     REPLACE(@Card, N'#MASK#', N'[12]'), @UI),
+    (N'MAILRELAY.DASHBOARD', @r2, N'report', NULL, NULL, N'MAILRELAY.DASHBOARD.PROBLEME', N'MAILRELAY_PROBLEME',
+     REPLACE(@Report, N'#HEIGHT#', N'450px'), @UI);
+
 -- ---------- Navigator-Funktionen und FunctionFolder ----------
 INSERT INTO vngSys.NavigatorFunctions (FunctionName, Activated, Caption, Command, Icon, SecurityParameters, Comment)
 VALUES
+    (N'MailRelayDashboard',    1, N'NAVIGATOR.MAILRELAY.DASHBOARD',    N'{"ResultType":"Command","Command":"OpenForm","FormName":"MAILRELAY.DASHBOARD"}',            N'CHART-BAR',   @Security, N'Vemas.MailRelay'),
     (N'MailRelayProtokoll',    1, N'NAVIGATOR.MAILRELAY.PROTOKOLL',    N'{"ResultType":"Command","Command":"OpenReport","DatasourceName":"MAILRELAY_PROTOKOLL"}',    N'ENVELOPE',    @Security, N'Vemas.MailRelay'),
     (N'MailRelayTestmails',    1, N'NAVIGATOR.MAILRELAY.TESTMAILS',    N'{"ResultType":"Command","Command":"OpenReport","DatasourceName":"MAILRELAY_TESTMAILS"}',    N'PAPER-PLANE', @Security, N'Vemas.MailRelay'),
     (N'MailRelayProfile',      1, N'NAVIGATOR.MAILRELAY.PROFILE',      N'{"ResultType":"Command","Command":"OpenReport","DatasourceName":"MAILRELAY_PROFILE"}',      N'COGS',         @Security, N'Vemas.MailRelay'),
@@ -401,7 +565,7 @@ INSERT INTO vngSys.FunctionFolderGroups (FunctionFolderGuid, OrderId, Caption)
 VALUES (@ffGuid, 1, N'MAILRELAY.GROUP.VERSAND'), (@ffGuid, 2, N'MAILRELAY.GROUP.EINRICHTUNG');
 
 INSERT INTO vngSys.FunctionFolderItems (FunctionFolderGuid, GroupOrderId, FunctionOrderId, NavigatorFunctionKey)
-VALUES (@ffGuid, 1, 1, N'MailRelayProtokoll'), (@ffGuid, 1, 2, N'MailRelayTestmails'),
+VALUES (@ffGuid, 1, 1, N'MailRelayDashboard'), (@ffGuid, 1, 2, N'MailRelayProtokoll'), (@ffGuid, 1, 3, N'MailRelayTestmails'),
        (@ffGuid, 2, 1, N'MailRelayProfile'),   (@ffGuid, 2, 2, N'MailRelaySmtpBenutzer');
 
 INSERT INTO vngSys.NavigatorItems (NavigatorName, ItemName, Activated, IsSeperator, NavigatorFunctionName, OrderID, UIProperties, SecurityParameters)
@@ -412,6 +576,23 @@ VALUES (@ZielNavigator, N'ItemMailRelay', 1, 0, N'FunctionFolderMailRelay', @Nav
 DECLARE @t TABLE (Placeholder NVARCHAR(400), De NVARCHAR(400), En NVARCHAR(400));
 INSERT INTO @t (Placeholder, De, En) VALUES
     (N'NAVIGATOR.MAILRELAY',                 N'Mail-Relay',                N'Mail relay'),
+    (N'NAVIGATOR.MAILRELAY.DASHBOARD',       N'Mail-Relay Übersicht',      N'Mail relay overview'),
+    (N'MAILRELAY.FORM.DASHBOARD',            N'Mail-Relay Übersicht',      N'Mail relay overview'),
+    (N'MAILRELAY.DASHBOARD.TAGE',            N'Mails der letzten 14 Tage', N'Mails of the last 14 days'),
+    (N'MAILRELAY.DASHBOARD.PROBLEME',        N'Offene und fehlgeschlagene Mails (Fehler der letzten 7 Tage)', N'Pending and failed mails (failures of the last 7 days)'),
+    (N'MAILRELAY.CHART.ANZAHL',              N'Mails',                     N'Mails'),
+    (N'MAILRELAY.CHART.GESENDET',            N'Gesendet',                  N'Sent'),
+    (N'MAILRELAY.CHART.FEHLGESCHLAGEN',      N'Fehlgeschlagen',            N'Failed'),
+    (N'MAILRELAY.CHART.ABGEBROCHEN',         N'Abgebrochen',               N'Cancelled'),
+    (N'MAILRELAY.CHART.OFFEN',               N'Offen',                     N'Pending'),
+    (N'MAILRELAY.TILE.GESENDET',             N'Heute gesendet',            N'Sent today'),
+    (N'MAILRELAY.TILE.GESENDET.BODY',        N'{{ data.count }} in den letzten 7 Tagen', N'{{ data.count }} in the last 7 days'),
+    (N'MAILRELAY.TILE.WARTESCHLANGE',        N'In der Warteschlange',      N'In queue'),
+    (N'MAILRELAY.TILE.WARTESCHLANGE.BODY',   N'davon {{ data.count }} in Wiederholung', N'{{ data.count }} of them retrying'),
+    (N'MAILRELAY.TILE.FEHLER',               N'Fehlgeschlagen (7 Tage)',   N'Failed (7 days)'),
+    (N'MAILRELAY.TILE.FEHLER.BODY',          N'davon {{ data.count }} heute', N'{{ data.count }} of them today'),
+    (N'MAILRELAY.TILE.PROFILE',              N'Client Secret fehlt / läuft ab', N'Client secret missing / expiring'),
+    (N'MAILRELAY.TILE.PROFILE.BODY',         N'von {{ data.count }} aktiven Profilen (Ablauf in 30 Tagen)', N'of {{ data.count }} active profiles (expiry within 30 days)'),
     (N'NAVIGATOR.MAILRELAY.PROTOKOLL',       N'Mail-Relay Protokoll',      N'Mail relay log'),
     (N'NAVIGATOR.MAILRELAY.TESTMAILS',       N'Mail-Relay Testmails',      N'Mail relay test mails'),
     (N'NAVIGATOR.MAILRELAY.PROFILE',         N'Mail-Relay Profile',        N'Mail relay profiles'),
