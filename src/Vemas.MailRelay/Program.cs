@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Logging.EventLog;
+using Vemas.MailRelay.Web;
 using Vemas.MailRelay.Configuration;
 using Vemas.MailRelay.Data;
 using Vemas.MailRelay.Maintenance;
@@ -90,9 +93,22 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddRazorPages();
 
+// Schlüssel für den Formular-Fälschungsschutz fest speichern: sonst werden Formulare nach jedem
+// Dienst-Neustart ungültig (400), wenn das Dienstkonto kein geladenes Benutzerprofil hat.
+var keyDirectory = new DirectoryInfo(Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), ServiceName, "keys"));
+keyDirectory.Create();
+builder.Services.AddDataProtection()
+    .SetApplicationName(ServiceName)
+    .PersistKeysToFileSystem(keyDirectory)
+    .ProtectKeysWithDpapi(protectToLocalMachine: true);
+
+// Abgelehnte Formulare (Fälschungsschutz) mit Grund in der Ereignisanzeige protokollieren
+builder.Logging.AddFilter<EventLogLoggerProvider>("Microsoft.AspNetCore.Mvc.ViewFeatures.Filters", LogLevel.Information);
+
 var app = builder.Build();
 
-app.UseStatusCodePages();
+app.UseStatusCodePages(StatusPages.WriteAsync);
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapRazorPages();
