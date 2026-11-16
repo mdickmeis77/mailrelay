@@ -211,6 +211,8 @@ Die `appsettings.json` neben der EXE im Dienstordner anpassen:
 | `Maintenance:MimeRetentionDays` | MIME-Inhalt löschen nach, Standard 30 Tage |
 | `Maintenance:LogRetentionDays` | Protokoll löschen nach, Standard 365 Tage |
 | `Maintenance:SecretExpiryWarningDays` | Warnung vor Secret-Ablauf, Standard 30 Tage |
+| `DatabaseMail:Enabled` | Fehler an Database Mail zurückmelden (Abschnitt 7), Standard `true` |
+| `DatabaseMail:ConnectionString` | Instanz mit Database Mail; leer = Instanz der Relay-Datenbank, Datenbank `msdb` |
 
 Bei Updates die vorhandene `appsettings.json` auf dem Server nicht mit der aus dem Ordner `install` überschreiben.
 
@@ -293,6 +295,29 @@ EXEC msdb.dbo.sysmail_update_account_sp
 Test: `EXEC msdb.dbo.sp_send_dbmail @recipients = 'ich@firma.de', @subject = 'Test', @body = 'Test';`
 
 Bcc-Empfänger (`@blind_copy_recipients`) werden korrekt übernommen.
+
+### Fehler an Database Mail zurückmelden
+
+Database Mail hält eine Mail für gesendet, sobald das Relay sie angenommen hat. Schlägt der Versand an Exchange
+Online danach **endgültig** fehl, meldet der Dienst das zurück:
+
+- die Mail erscheint in `msdb.dbo.sysmail_faileditems` statt in `sysmail_sentitems`,
+- der Fehlertext steht im Database-Mail-Protokoll (`sysmail_event_log`, SSMS: Datenbank-E-Mail-Protokoll anzeigen),
+  z.B. `Vemas.MailRelay [Relay-Nr. 815]: Zustellung über Exchange Online endgültig fehlgeschlagen. …`,
+- wird die Mail später erfolgreich neu gesendet, steht sie wieder auf „gesendet“,
+- im Verlauf der Mail im Relay erscheint die Aktion „Database Mail“ mit der Nr. der Database-Mail.
+
+Einrichtung: `install/Install-DatabaseMail-Rueckmeldung.sql` auf der SQL-Server-Instanz mit Database Mail ausführen
+(sysadmin, `@ServiceUser` = Dienstkonto). Das Skript legt `msdb.dbo.mailrelay_StatusMelden` an; das Dienstkonto darf
+nur diese Prozedur ausführen, nicht direkt in die Tabellen von msdb schreiben. Liegt die Relay-Datenbank auf einer
+anderen Instanz, `DatabaseMail:ConnectionString` setzen. Ist die Prozedur nicht eingerichtet, läuft der Versand
+normal weiter; der Dienst schreibt höchstens einmal pro Stunde einen Hinweis ins Ereignisprotokoll.
+
+Zuordnung: Database Mail schreibt keine eigene Kennung in die Mail. Zugeordnet wird über Betreff, Empfänger (alle
+Empfänger der Database-Mail müssen Empfänger der Relay-Mail sein) und Zeit (höchstens 30 Sekunden zwischen Eingang im
+Relay und Versandzeit in msdb). Bei mehreren gleichen Mails kurz hintereinander gilt die zeitlich nächste, wenn sie
+eindeutig näher liegt – sonst wird nichts geändert. Mails aus SSRS oder anderen Anwendungen haben keinen Eintrag in
+msdb und bleiben unberührt. Abgebrochene Mails werden nicht zurückgemeldet.
 
 ## 8. SSRS umstellen
 

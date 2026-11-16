@@ -73,7 +73,7 @@
             {
                 <tr>
                     <td style="white-space:nowrap">@Format.LocalTime(attempt.AttemptAt)</td>
-                    <td>@attempt.AttemptType</td>
+                    <td>@Format.AttemptType(attempt.AttemptType)</td>
                     <td>
                         @if (attempt.Success == true)
                         {

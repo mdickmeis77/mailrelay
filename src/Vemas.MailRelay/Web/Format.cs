@@ -49,6 +49,18 @@ public static class Format
         };
     }
 
+    public static string AttemptType(string attemptType)
+    {
+        return attemptType switch
+        {
+            "Send" => "Versand",
+            "Resend" => "Neu senden",
+            "Cancel" => "Abbrechen",
+            "DbMail" => "Database Mail",
+            _ => attemptType
+        };
+    }
+
     public static string Shorten(string text, int maxLength)
     {
         if (string.IsNullOrEmpty(text) || text.Length <= maxLength)

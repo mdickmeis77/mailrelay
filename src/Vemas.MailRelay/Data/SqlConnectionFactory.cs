@@ -5,7 +5,7 @@ namespace Vemas.MailRelay.Data;
 /// <summary>Erzeugt geöffnete Verbindungen zur NextGen-Datenbank (Schema mailrelay).</summary>
 public sealed class SqlConnectionFactory
 {
-    private const string ConnectionStringName = "MailRelay";
+    public const string ConnectionStringName = "MailRelay";
 
     private readonly string _connectionString;
 

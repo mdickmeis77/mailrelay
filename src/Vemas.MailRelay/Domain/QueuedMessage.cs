@@ -8,6 +8,11 @@ public sealed class QueuedMessage
     public string EnvelopeTo { get; set; } = string.Empty;
     public byte[] Mime { get; set; }
     public int AttemptCount { get; set; }
+    public string Subject { get; set; }
+    public DateTime ReceivedAtUtc { get; set; }
+
+    /// <summary>Zugeordnete Mail in msdb.dbo.sysmail_mailitems, sofern ein Fehler an Database Mail gemeldet wurde.</summary>
+    public int? DbMailItemId { get; set; }
 
     public IReadOnlyList<string> GetEnvelopeRecipients()
     {

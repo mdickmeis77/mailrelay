@@ -23,7 +23,7 @@ public sealed class MessageQueueRepository
     private const string ClaimSql = """
         WITH due AS
         (
-            SELECT TOP (@BatchSize) MessageId, ProfileId, EnvelopeTo, Mime, AttemptCount, Status, LockedUntil
+            SELECT TOP (@BatchSize) MessageId, ProfileId, EnvelopeTo, Mime, AttemptCount, Status, LockedUntil, Subject, ReceivedAt, DbMailItemId
               FROM mailrelay.Message WITH (ROWLOCK, UPDLOCK, READPAST)
              WHERE (Status IN ('Queued', 'Retry') AND NextAttemptAt <= SYSUTCDATETIME())
                 OR (Status = 'Sending' AND LockedUntil < SYSUTCDATETIME())
@@ -32,7 +32,8 @@ public sealed class MessageQueueRepository
         UPDATE due
            SET Status = 'Sending',
                LockedUntil = DATEADD(MINUTE, @LockMinutes, SYSUTCDATETIME())
-        OUTPUT inserted.MessageId, inserted.ProfileId, inserted.EnvelopeTo, inserted.Mime, inserted.AttemptCount;
+        OUTPUT inserted.MessageId, inserted.ProfileId, inserted.EnvelopeTo, inserted.Mime, inserted.AttemptCount,
+               inserted.Subject, inserted.ReceivedAt, inserted.DbMailItemId;
         """;
 
     private const string CompleteSql = """
@@ -47,6 +48,13 @@ public sealed class MessageQueueRepository
 
         INSERT INTO mailrelay.Attempt (MessageId, AttemptType, Success, HttpStatus, ErrorText, GraphRequestId)
         VALUES (@MessageId, 'Send', @Success, @HttpStatus, @ErrorText, @RequestId);
+        """;
+
+    private const string DatabaseMailFeedbackSql = """
+        UPDATE mailrelay.Message SET DbMailItemId = @MailItemId WHERE MessageId = @MessageId;
+
+        INSERT INTO mailrelay.Attempt (MessageId, AttemptType, Success, ErrorText)
+        VALUES (@MessageId, 'DbMail', 1, @Text);
         """;
 
     private readonly SqlConnectionFactory _connectionFactory;
@@ -96,7 +104,10 @@ public sealed class MessageQueueRepository
                 ProfileId = reader.GetInt32(1),
                 EnvelopeTo = reader.GetString(2),
                 Mime = reader.IsDBNull(3) ? null : (byte[])reader.GetValue(3),
-                AttemptCount = reader.GetInt32(4)
+                AttemptCount = reader.GetInt32(4),
+                Subject = reader.IsDBNull(5) ? null : reader.GetString(5),
+                ReceivedAtUtc = reader.GetDateTime(6).AsUtc(),
+                DbMailItemId = reader.IsDBNull(7) ? null : reader.GetInt32(7)
             });
         }
 
@@ -130,6 +141,17 @@ public sealed class MessageQueueRepository
         command.Add("@HttpStatus", httpStatus);
         command.Add("@ErrorText", error);
         command.Add("@RequestId", Truncate(requestId, 100));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>Hält eine Rückmeldung an Database Mail im Verlauf fest und merkt sich die zugeordnete Database-Mail.</summary>
+    public async Task SaveDatabaseMailFeedbackAsync(long messageId, int mailItemId, string text, CancellationToken cancellationToken)
+    {
+        await using var connection = await _connectionFactory.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand(DatabaseMailFeedbackSql);
+        command.Add("@MessageId", messageId);
+        command.Add("@MailItemId", mailItemId);
+        command.Add("@Text", text);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

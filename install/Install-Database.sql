@@ -118,7 +118,7 @@ CREATE TABLE mailrelay.Attempt
     AttemptId      BIGINT          IDENTITY(1,1) NOT NULL CONSTRAINT PK_mailrelay_Attempt PRIMARY KEY,
     MessageId      BIGINT          NOT NULL CONSTRAINT FK_mailrelay_Attempt_Message REFERENCES mailrelay.Message (MessageId) ON DELETE CASCADE,
     AttemptAt      DATETIME2(3)    NOT NULL CONSTRAINT DF_mailrelay_Attempt_AttemptAt DEFAULT (SYSUTCDATETIME()),
-    AttemptType    VARCHAR(16)     NOT NULL,   -- Send | Resend | Cancel
+    AttemptType    VARCHAR(16)     NOT NULL,   -- Send | Resend | Cancel | DbMail
     Success        BIT             NULL,
     HttpStatus     INT             NULL,
     ErrorText      NVARCHAR(MAX)   NULL,
@@ -271,6 +271,18 @@ IF COL_LENGTH(N'mailrelay.Message', N'BodyText') IS NULL
 GO
 IF COL_LENGTH(N'mailrelay.Message', N'AttachmentNames') IS NULL
     ALTER TABLE mailrelay.Message ADD AttachmentNames NVARCHAR(MAX) NULL;
+GO
+-- Rückmeldung an Database Mail: Nr. der zugeordneten Mail in msdb.dbo.sysmail_mailitems
+IF COL_LENGTH(N'mailrelay.Message', N'DbMailItemId') IS NULL
+    ALTER TABLE mailrelay.Message ADD DbMailItemId INT NULL;
+GO
+-- Verlaufsart "DbMail" (Rückmeldung an Database Mail) zulassen
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_mailrelay_Attempt_Type' AND definition LIKE N'%DbMail%')
+BEGIN
+    IF OBJECT_ID(N'mailrelay.CK_mailrelay_Attempt_Type', N'C') IS NOT NULL
+        ALTER TABLE mailrelay.Attempt DROP CONSTRAINT CK_mailrelay_Attempt_Type;
+    ALTER TABLE mailrelay.Attempt ADD CONSTRAINT CK_mailrelay_Attempt_Type CHECK (AttemptType IN ('Send', 'Resend', 'Cancel', 'DbMail'));
+END
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'mailrelay.Message') AND name = N'IX_mailrelay_Message_Customer')
     CREATE INDEX IX_mailrelay_Message_Customer ON mailrelay.Message (CustomerId, MessageId DESC);
@@ -466,7 +478,7 @@ SELECT a.AttemptId,
        a.MessageId,
        mailrelay_kunde.fn_Lokal(a.AttemptAt) AS Zeitpunkt,
        a.AttemptType                         AS Art,
-       CASE a.AttemptType WHEN 'Send' THEN N'Versand' WHEN 'Resend' THEN N'Neu senden' WHEN 'Cancel' THEN N'Abbrechen' ELSE a.AttemptType END AS ArtText,
+       CASE a.AttemptType WHEN 'Send' THEN N'Versand' WHEN 'Resend' THEN N'Neu senden' WHEN 'Cancel' THEN N'Abbrechen' WHEN 'DbMail' THEN N'Database Mail' ELSE a.AttemptType END AS ArtText,
        a.Success                             AS Erfolg,
        a.HttpStatus,
        a.ErrorText                           AS Fehler,

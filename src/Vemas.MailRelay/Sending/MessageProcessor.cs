@@ -12,15 +12,17 @@ public sealed class MessageProcessor
     private readonly RelayConfigCache _cache;
     private readonly GraphMailSender _sender;
     private readonly MessageQueueRepository _queueRepository;
+    private readonly DatabaseMailFeedback _databaseMailFeedback;
     private readonly SendingOptions _options;
     private readonly ILogger<MessageProcessor> _logger;
 
     public MessageProcessor(RelayConfigCache cache, GraphMailSender sender, MessageQueueRepository queueRepository,
-        IOptions<SendingOptions> options, ILogger<MessageProcessor> logger)
+        DatabaseMailFeedback databaseMailFeedback, IOptions<SendingOptions> options, ILogger<MessageProcessor> logger)
     {
         _cache = cache;
         _sender = sender;
         _queueRepository = queueRepository;
+        _databaseMailFeedback = databaseMailFeedback;
         _options = options.Value;
         _logger = logger;
     }
@@ -37,6 +39,7 @@ public sealed class MessageProcessor
             // Ergebnis auch beim Herunterfahren speichern, sonst würde die Mail doppelt versendet.
             await _queueRepository.MarkSentAsync(message.MessageId, response.HttpStatus, response.RequestId, CancellationToken.None);
             _logger.LogDebug("Mail {Id} über Profil '{Profile}' versendet.", message.MessageId, profile.Name);
+            await _databaseMailFeedback.ReportSentAsync(message);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -69,6 +72,7 @@ public sealed class MessageProcessor
                 await _queueRepository.MarkFailedAsync(message.MessageId, error.HttpStatus, error.Message, error.RequestId, CancellationToken.None);
                 _logger.LogError(exception, "Mail {Id} endgültig fehlgeschlagen nach {Attempt} Versuch(en): {Error}",
                     message.MessageId, attemptNumber, error.Message);
+                await _databaseMailFeedback.ReportFailedAsync(message, error.Message);
             }
         }
         catch (Exception dbException)

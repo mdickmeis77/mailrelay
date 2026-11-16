@@ -28,6 +28,7 @@ builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOpt
 builder.Services.Configure<WebOptions>(builder.Configuration.GetSection(WebOptions.SectionName));
 builder.Services.Configure<SendingOptions>(builder.Configuration.GetSection(SendingOptions.SectionName));
 builder.Services.Configure<MaintenanceOptions>(builder.Configuration.GetSection(MaintenanceOptions.SectionName));
+builder.Services.Configure<DatabaseMailOptions>(builder.Configuration.GetSection(DatabaseMailOptions.SectionName));
 
 // Datenzugriff und Konfiguration
 builder.Services.AddSingleton<SqlConnectionFactory>();
@@ -39,6 +40,7 @@ builder.Services.AddSingleton<MaintenanceRepository>();
 builder.Services.AddSingleton<DashboardRepository>();
 builder.Services.AddSingleton<CustomerRepository>();
 builder.Services.AddSingleton<TestMailRequestRepository>();
+builder.Services.AddSingleton<DatabaseMailRepository>();
 builder.Services.AddSingleton<RelayConfigCache>();
 
 // SMTP-Eingang
@@ -59,6 +61,7 @@ builder.Services.AddSingleton<GraphTokenProvider>();
 builder.Services.AddSingleton<GraphMailClient>();
 builder.Services.AddSingleton<LargeMessageSender>();
 builder.Services.AddSingleton<GraphMailSender>();
+builder.Services.AddSingleton<DatabaseMailFeedback>();
 builder.Services.AddSingleton<MessageProcessor>();
 builder.Services.AddSingleton<QueueSignal>();
 builder.Services.AddSingleton<TestMailService>();
