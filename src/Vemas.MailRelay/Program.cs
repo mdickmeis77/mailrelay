@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.EventLog;
 using Vemas.MailRelay.Web;
@@ -91,7 +92,9 @@ builder.Services.AddAuthorization(options =>
         .RequireRole(webOptions.AdminGroup)
         .Build();
 });
-builder.Services.AddRazorPages();
+// Formularschutz prüft AntiforgeryPageFilter selbst, um bei Ablehnung den Grund anzuzeigen und zu protokollieren.
+builder.Services.AddRazorPages(options => options.Conventions.ConfigureFilter(new IgnoreAntiforgeryTokenAttribute()))
+    .AddMvcOptions(options => options.Filters.Add<AntiforgeryPageFilter>());
 
 // Schlüssel für den Formular-Fälschungsschutz fest speichern: sonst werden Formulare nach jedem
 // Dienst-Neustart ungültig (400), wenn das Dienstkonto kein geladenes Benutzerprofil hat.
