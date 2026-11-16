@@ -31,6 +31,13 @@ public sealed class ProfileRepository
              WHERE ProfileId = @ProfileId;
         END
 
+        -- Mails und Testaufträge ohne Kunde übernehmen den Kunden ihres Profils (z.B. bei nachträglicher Zuordnung)
+        IF @CustomerId IS NOT NULL
+        BEGIN
+            UPDATE mailrelay.Message SET CustomerId = @CustomerId WHERE ProfileId = @ProfileId AND CustomerId IS NULL;
+            UPDATE mailrelay.TestMailRequest SET CustomerId = @CustomerId WHERE ProfileId = @ProfileId AND CustomerId IS NULL;
+        END
+
         DELETE FROM mailrelay.AllowedSender WHERE ProfileId = @ProfileId;
 
         INSERT INTO mailrelay.AllowedSender (ProfileId, Pattern)

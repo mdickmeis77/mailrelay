@@ -284,6 +284,15 @@ BEGIN
     ALTER TABLE mailrelay.Attempt ADD CONSTRAINT CK_mailrelay_Attempt_Type CHECK (AttemptType IN ('Send', 'Resend', 'Cancel', 'DbMail'));
 END
 GO
+-- Mails und Testaufträge ohne Kunde übernehmen den Kunden ihres Profils
+-- (Profil erst nach dem Eingang der Mails einem Kunden zugeordnet)
+UPDATE m SET CustomerId = p.CustomerId
+  FROM mailrelay.Message m JOIN mailrelay.Profile p ON p.ProfileId = m.ProfileId
+ WHERE m.CustomerId IS NULL AND p.CustomerId IS NOT NULL;
+UPDATE t SET CustomerId = p.CustomerId
+  FROM mailrelay.TestMailRequest t JOIN mailrelay.Profile p ON p.ProfileId = t.ProfileId
+ WHERE t.CustomerId IS NULL AND p.CustomerId IS NOT NULL;
+GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'mailrelay.Message') AND name = N'IX_mailrelay_Message_Customer')
     CREATE INDEX IX_mailrelay_Message_Customer ON mailrelay.Message (CustomerId, MessageId DESC);
 GO
