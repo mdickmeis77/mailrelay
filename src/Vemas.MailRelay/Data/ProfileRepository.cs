@@ -7,17 +7,18 @@ namespace Vemas.MailRelay.Data;
 public sealed class ProfileRepository
 {
     private const string SelectProfiles = """
-        SELECT ProfileId, Name, TenantId, ClientId, SecretEncrypted, SecretExpiresAt,
-               SenderMode, DefaultSender, IsActive, ModifiedAt
-          FROM mailrelay.Profile
-         ORDER BY Name
+        SELECT p.ProfileId, p.Name, p.TenantId, p.ClientId, p.SecretEncrypted, p.SecretExpiresAt,
+               p.SenderMode, p.DefaultSender, p.IsActive, p.ModifiedAt, p.CustomerId, c.Name AS CustomerName
+          FROM mailrelay.Profile p
+          LEFT JOIN mailrelay.Customer c ON c.CustomerId = p.CustomerId
+         ORDER BY p.Name
         """;
 
     private const string SaveSql = """
         IF @ProfileId = 0
         BEGIN
-            INSERT INTO mailrelay.Profile (Name, TenantId, ClientId, SecretEncrypted, SecretExpiresAt, SenderMode, DefaultSender, IsActive)
-            VALUES (@Name, @TenantId, @ClientId, @Secret, @SecretExpiresAt, @SenderMode, @DefaultSender, @IsActive);
+            INSERT INTO mailrelay.Profile (Name, TenantId, ClientId, SecretEncrypted, SecretExpiresAt, SenderMode, DefaultSender, IsActive, CustomerId)
+            VALUES (@Name, @TenantId, @ClientId, @Secret, @SecretExpiresAt, @SenderMode, @DefaultSender, @IsActive, @CustomerId);
             SET @ProfileId = CAST(SCOPE_IDENTITY() AS INT);
         END
         ELSE
@@ -26,7 +27,7 @@ public sealed class ProfileRepository
                SET Name = @Name, TenantId = @TenantId, ClientId = @ClientId,
                    SecretEncrypted = ISNULL(@Secret, SecretEncrypted),
                    SecretExpiresAt = @SecretExpiresAt, SenderMode = @SenderMode,
-                   DefaultSender = @DefaultSender, IsActive = @IsActive, ModifiedAt = SYSUTCDATETIME()
+                   DefaultSender = @DefaultSender, IsActive = @IsActive, CustomerId = @CustomerId, ModifiedAt = SYSUTCDATETIME()
              WHERE ProfileId = @ProfileId;
         END
 
@@ -99,6 +100,7 @@ public sealed class ProfileRepository
         command.Add("@SenderMode", profile.SenderMode.ToString());
         command.Add("@DefaultSender", profile.DefaultSender.Trim());
         command.Add("@IsActive", profile.IsActive);
+        command.Add("@CustomerId", profile.CustomerId);
         command.Add("@Senders", string.Join('\n', profile.AllowedSenders));
 
         int id = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
@@ -119,7 +121,9 @@ public sealed class ProfileRepository
             SenderMode = Enum.Parse<SenderMode>(reader.GetString(reader.GetOrdinal("SenderMode"))),
             DefaultSender = reader.GetString(reader.GetOrdinal("DefaultSender")),
             IsActive = reader.GetBoolean(reader.GetOrdinal("IsActive")),
-            ModifiedAt = reader.GetDateTime(reader.GetOrdinal("ModifiedAt")).AsUtc()
+            ModifiedAt = reader.GetDateTime(reader.GetOrdinal("ModifiedAt")).AsUtc(),
+            CustomerId = reader.GetInt32OrNull("CustomerId"),
+            CustomerName = reader.GetStringOrNull("CustomerName")
         };
     }
 }

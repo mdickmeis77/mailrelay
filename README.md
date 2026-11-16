@@ -32,6 +32,7 @@ SSRS (Abo-Versand) ─────────┘                            │
 8. [SSRS umstellen](#8-ssrs-umstellen)
 9. [Betrieb](#9-betrieb)
 10. [Fehlerbilder](#10-fehlerbilder)
+11. [Kundenzugriff aus NextGen](#11-kundenzugriff-aus-nextgen)
 
 ---
 
@@ -128,9 +129,12 @@ Microsoft ersetzt Application Access Policies schrittweise durch RBAC for Applic
 
 ## 3. Datenbank installieren
 
-`install/Install-Database.sql` in SSMS **auf der NextGen-Datenbank** ausführen (db_owner, für `CREATE LOGIN` zusätzlich securityadmin).
+`install/Install-Database.sql` in SSMS ausführen (db_owner, für `CREATE LOGIN` zusätzlich securityadmin):
 
-Vorher in Abschnitt 6 des Skripts das Dienstkonto eintragen:
+- **Einzelinstallation beim Kunden:** in der NextGen-Datenbank
+- **Cloud (viele Kunden auf einem SQL Server):** in einer eigenen Relay-Datenbank
+
+Vorher in Abschnitt 9 des Skripts das Dienstkonto eintragen:
 
 ```sql
 DECLARE @ServiceUser SYSNAME = N'CONTOSO\svc-mailrelay';
@@ -146,8 +150,15 @@ Das Skript ist wiederholbar und legt an:
 | `mailrelay.Message` | Queue und Protokoll inkl. MIME-Inhalt |
 | `mailrelay.Attempt` | alle Versuche und manuellen Aktionen |
 | `mailrelay.Resend` / `Cancel` / `Cleanup` | Neu senden, Abbrechen, Aufräumen |
+| `mailrelay.Customer` / `CustomerLogin` | Kunden und ihre Windows-Logins (Kundenzugriff aus NextGen, Abschnitt 11) |
+| `mailrelay.TestMailRequest` | Testmail-Aufträge aus NextGen |
+| Row-Level Security `mailrelay.CustomerPolicy` | Datentrennung je Kunde |
+| Schema `mailrelay_kunde` | Views und Prozeduren für den Kundenzugriff |
 
-Das Dienstkonto erhält nur `SELECT, INSERT, UPDATE, DELETE, EXECUTE` auf das Schema – keine DDL-Rechte.
+Das Dienstkonto erhält nur `SELECT, INSERT, UPDATE, DELETE, EXECUTE` auf das Schema – keine DDL-Rechte – und wird
+Mitglied der Rolle `mailrelay_service` (sieht trotz Row-Level Security alle Kunden).
+
+Bei einem Update das Skript einfach erneut ausführen; es ergänzt neue Tabellen und Spalten.
 
 ## 4. EXE erstellen
 
@@ -339,3 +350,66 @@ UPDATE mailrelay.SmtpUser SET PasswordPlain = N'<neues Passwort>'               
 | `Graph 403 ErrorSendAsDenied` | Standard-Postfach hat kein „Senden als“-Recht auf den Absender → `Add-RecipientPermission` (Abschnitt 2) |
 | Dienst startet nicht, Fehler 1069 | Dienstkonto fehlt das Recht „Als Dienst anmelden“ |
 | Weboberfläche: 403 | Benutzer ist nicht in `Web:AdminGroup` (nach Gruppenänderung neu anmelden) |
+
+## 11. Kundenzugriff aus NextGen
+
+Zusatz zum bisherigen Verfahren: Kunden sehen in ihrer NextGen-Instanz das Protokoll ihrer Mails, senden neu,
+brechen ab, fordern Testmails an und bearbeiten ihre Profile – jeweils **nur ihre eigenen Daten**.
+Profile und SMTP-Benutzer ohne Kunde sind weiterhin nur in der Relay-Weboberfläche sichtbar.
+
+### Prinzip
+
+- Ein Kunde wird am **Windows-Login des App-Pools** seiner NextGen-Instanz erkannt (Tabelle `mailrelay.CustomerLogin`).
+- **Row-Level Security** in der Relay-Datenbank trennt die Daten. Sichtbar ist eine Zeile, wenn der Login zum Kunden
+  der Zeile gehört, Mitglied von `mailrelay_service` ist (Relay-Dienst) oder db_owner der Relay-Datenbank ist.
+- Kunden-Logins erhalten nur `SELECT`/`EXECUTE` auf das Schema `mailrelay_kunde`, nie auf die Tabellen.
+- In der NextGen-Datenbank legt `Add-Customer.sql` das Schema `mailrelay_ng` mit Synonymen (`rk_*`) auf die
+  Kunden-Schnittstelle an; das NextGen-Paket nutzt nur diese Synonyme.
+
+| | Cloud | Einzelinstallation |
+|---|---|---|
+| Schema `mailrelay` | eigene Relay-Datenbank | in der NextGen-Datenbank |
+| Synonyme `mailrelay_ng.rk_*` | zeigen auf die Relay-Datenbank | zeigen auf dieselbe Datenbank |
+| Kunden-Login | darf in der Relay-DB **nicht** db_owner/sysadmin sein (Skript prüft) | ist meist db_owner und sieht alles (gewollt) |
+| NextGen-Paket | identisch | identisch |
+
+### Einrichtung je Kunde
+
+1. `Install-Database.sql` in der aktuellen Version ausführen (einmalig, siehe Abschnitt 3).
+2. `Add-Customer.sql` **in der Datenbank des Relays** ausführen. Oben vier Werte eintragen:
+   ```sql
+   DECLARE @CustomerName NVARCHAR(200) = N'Musterkunde GmbH';
+   DECLARE @ShortName    NVARCHAR(50)  = N'MUSTER';                    -- erscheint im Verlauf
+   DECLARE @Login        SYSNAME       = N'CONTOSO\svc-nextgen-muster'; -- App-Pool-Konto der NextGen-Instanz
+   DECLARE @NextGenDb    SYSNAME       = N'NextGen_Muster';
+   ```
+   Das Skript legt Kunde und Login-Zuordnung an, vergibt die Rechte und erzeugt die Synonyme in der NextGen-Datenbank.
+3. `NextGen-Paket.sql` **in der NextGen-Datenbank** ausführen. Navigator und Position stehen oben im Abschnitt 3
+   des Skripts (`@ZielNavigator`, Standard `Default`).
+4. In der Relay-Weboberfläche unter **Profile** dem Profil den Kunden zuordnen. SMTP-Benutzer gehören automatisch
+   zum Kunden ihres Profils; Mails erhalten den Kunden beim Eingang.
+
+Kunden und Logins lassen sich auch in der Weboberfläche unter **Kunden** pflegen; Datenbank-Benutzer, Rechte und
+Synonyme legt aber nur `Add-Customer.sql` an.
+
+### Was der Kunde in NextGen sieht
+
+FunctionFolder **Mail-Relay** (nur für NextGen-Administratoren, OpenPermission `AdministrateNextGen`):
+
+| Eintrag | Funktionen |
+|---|---|
+| Protokoll | Mails der letzten 30 Tage (Zeitraum einstellbar); Mail anzeigen (Kopfdaten, Text, Anhangsnamen), Verlauf, Neu senden, Versand abbrechen |
+| Testmails | angeforderte Testmails mit Ergebnis |
+| Profile | Profil bearbeiten (Name, Tenant, Client-ID, Standard-Postfach, „Senden als“, erlaubte Absender), Client Secret setzen, Testmail senden |
+| SMTP-Benutzer | nur lesend |
+
+Aktionen aus NextGen erscheinen im Verlauf als `<NextGen-Benutzer> (<Kurzname>) [<Windows-Login>]`.
+Ein neues Client Secret landet im Klartextfeld und wird vom Dienst innerhalb einer Minute verschlüsselt.
+Profile anlegen, sperren und SMTP-Benutzer pflegen bleibt dem Hoster vorbehalten.
+
+### Hinweise
+
+- Die Aktionen laufen über den NextGen-Standardaufruf `formapicall/GenericExecuteSP`. Fehlt einem Administrator
+  dafür eine Berechtigung, meldet NextGen `MISSING_PERMISSION`.
+- Kunden entfernen: in der Weboberfläche sperren (sieht sofort nichts mehr) bzw. Login-Zuordnung löschen;
+  NextGen-Metadaten löschen: Einträge mit `MAILRELAY_` / `MAILRELAY.` / `MailRelay` in `vngSys` sowie das Schema `mailrelay_ng`.

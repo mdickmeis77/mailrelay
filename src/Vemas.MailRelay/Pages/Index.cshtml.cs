@@ -10,13 +10,13 @@ namespace Vemas.MailRelay.Pages;
 /// <summary>Dashboard: Kennzahlen des Tages und Warnungen zu ablaufenden Secrets.</summary>
 public sealed class IndexModel : PageModel
 {
-    private readonly MessageLogRepository _logRepository;
+    private readonly DashboardRepository _dashboardRepository;
     private readonly ProfileRepository _profileRepository;
     private readonly MaintenanceOptions _maintenanceOptions;
 
-    public IndexModel(MessageLogRepository logRepository, ProfileRepository profileRepository, IOptions<MaintenanceOptions> maintenanceOptions)
+    public IndexModel(DashboardRepository dashboardRepository, ProfileRepository profileRepository, IOptions<MaintenanceOptions> maintenanceOptions)
     {
-        _logRepository = logRepository;
+        _dashboardRepository = dashboardRepository;
         _profileRepository = profileRepository;
         _maintenanceOptions = maintenanceOptions.Value;
     }
@@ -30,7 +30,7 @@ public sealed class IndexModel : PageModel
     public async Task OnGetAsync()
     {
         var cancellationToken = HttpContext.RequestAborted;
-        Stats = await _logRepository.GetDashboardAsync(cancellationToken);
+        Stats = await _dashboardRepository.GetDashboardAsync(cancellationToken);
 
         var profiles = await _profileRepository.GetAllAsync(cancellationToken);
         ExpiringProfiles = profiles.Where(p => SecretExpiry.NeedsWarning(p, _maintenanceOptions.SecretExpiryWarningDays)).ToList();

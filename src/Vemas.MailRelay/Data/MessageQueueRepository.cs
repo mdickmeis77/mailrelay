@@ -9,10 +9,13 @@ public sealed class MessageQueueRepository
 
     private const string InsertSql = """
         INSERT INTO mailrelay.Message
-            (SmtpUserId, ProfileId, ClientIp, EnvelopeFrom, EnvelopeTo, HeaderFrom, HeaderTo, Subject, SizeBytes, Mime, Status)
+            (SmtpUserId, ProfileId, CustomerId, ClientIp, EnvelopeFrom, EnvelopeTo, HeaderFrom, HeaderTo, Subject, SizeBytes, Mime, Status,
+             HeaderCc, ReplyTo, BodyText, AttachmentNames)
         OUTPUT inserted.MessageId
-        VALUES
-            (@SmtpUserId, @ProfileId, @ClientIp, @EnvelopeFrom, @EnvelopeTo, @HeaderFrom, @HeaderTo, @Subject, @SizeBytes, @Mime, 'Queued');
+        SELECT @SmtpUserId, @ProfileId, p.CustomerId, @ClientIp, @EnvelopeFrom, @EnvelopeTo, @HeaderFrom, @HeaderTo, @Subject, @SizeBytes, @Mime, 'Queued',
+               @HeaderCc, @ReplyTo, @BodyText, @AttachmentNames
+          FROM mailrelay.Profile p
+         WHERE p.ProfileId = @ProfileId;
         """;
 
     // Fällige Mails reservieren. READPAST überspringt gesperrte Zeilen, abgelaufene
@@ -67,7 +70,13 @@ public sealed class MessageQueueRepository
         command.Add("@Subject", Truncate(message.Subject, 1000));
         command.Add("@SizeBytes", message.Mime.Length);
         command.AddBinary("@Mime", message.Mime);
-        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken));
+        command.Add("@HeaderCc", message.Content.HeaderCc);
+        command.Add("@ReplyTo", Truncate(message.Content.ReplyTo, 320));
+        command.Add("@BodyText", message.Content.BodyText);
+        command.Add("@AttachmentNames", message.Content.AttachmentNames);
+
+        object id = await command.ExecuteScalarAsync(cancellationToken);
+        return id is null ? throw new InvalidOperationException($"Profil {message.ProfileId} existiert nicht.") : Convert.ToInt64(id);
     }
 
     public async Task<List<QueuedMessage>> ClaimBatchAsync(int batchSize, CancellationToken cancellationToken)

@@ -12,4 +12,7 @@ public sealed class NewMessage
     public string HeaderTo { get; set; }
     public string Subject { get; set; }
     public byte[] Mime { get; set; } = [];
+
+    /// <summary>Anzeige in NextGen: Cc, Antwortadresse, Text (max. 100.000 Zeichen) und Anhangsnamen.</summary>
+    public MessageContent Content { get; set; } = new();
 }

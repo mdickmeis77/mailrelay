@@ -9,3 +9,6 @@ publish/
 install/*.exe
 install/*.pdb
 install/appsettings*.json
+
+# von Visual Studio/dotnet erzeugt
+src/**/Properties/launchSettings.json
