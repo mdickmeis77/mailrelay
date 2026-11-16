@@ -17,7 +17,7 @@
 -- Das Skript ist wiederholbar. Es
 --   1. legt den Kunden an und ordnet den Login der NextGen-Instanz zu,
 --   2. gibt dem Login Rechte nur auf die Kunden-Schnittstelle (Schema mailrelay_kunde),
---      in der Cloud mit Prüfung: kein db_owner, kein sysadmin,
+--      mit Prüfung: Sieht der Login alle Daten (db_owner, sysadmin), bricht das Skript ab, sobald mehrere Kunden existieren,
 --   3. legt in der NextGen-Datenbank das Schema mailrelay_ng mit Synonymen auf die Schnittstelle an.
 -- Danach: NextGen-Paket.sql in der NextGen-Datenbank ausführen und in der Relay-Weboberfläche
 -- die Profile des Kunden zuordnen.
@@ -56,8 +56,8 @@ BEGIN
     PRINT N'Windows-Login ' + @Login + N' angelegt.';
 END
 
-IF @IsCloud = 1 AND IS_SRVROLEMEMBER(N'sysadmin', @Login) = 1
-    THROW 50103, N'Der Login ist sysadmin und würde alle Kunden sehen. Für den Kundenzugriff in der Cloud nicht zulässig.', 1;
+-- Schritte 1 und 2 in einer Transaktion: bei einem Abbruch bleibt nichts halb angelegt
+BEGIN TRANSACTION;
 
 -- ------------------------------------------------------------
 -- 1. Kunde und Login-Zuordnung
@@ -89,15 +89,31 @@ BEGIN
     PRINT N'Datenbank-Benutzer ' + @UserName + N' angelegt.';
 END
 
-IF @IsCloud = 1
+-- Sieht der Login trotz Row-Level Security alle Daten (sysadmin, db_owner, mailrelay_service)?
+-- Bei nur einem Kunden unkritisch (Hinweis), bei mehreren Kunden ein Datenleck (Abbruch).
+DECLARE @SeesAll NVARCHAR(100) =
+    CASE WHEN IS_SRVROLEMEMBER(N'sysadmin', @Login) = 1          THEN N'sysadmin'
+         WHEN IS_ROLEMEMBER(N'db_owner', @UserName) = 1          THEN N'db_owner der Relay-Datenbank'
+         WHEN IS_ROLEMEMBER(N'mailrelay_service', @UserName) = 1 THEN N'Mitglied von mailrelay_service (Rolle des Relay-Dienstes)'
+    END;
+
+IF @SeesAll IS NOT NULL
 BEGIN
-    IF IS_ROLEMEMBER(N'db_owner', @UserName) = 1 OR IS_ROLEMEMBER(N'mailrelay_service', @UserName) = 1
-        THROW 50105, N'Der Login ist in der Relay-Datenbank db_owner bzw. Mitglied von mailrelay_service und würde alle Kunden sehen. Bitte die Rolle entfernen.', 1;
+    IF EXISTS (SELECT 1 FROM mailrelay.Customer WHERE CustomerId <> @CustomerId)
+    BEGIN
+        DECLARE @msg NVARCHAR(2000) = N'Der Login ist ' + @SeesAll + N' und würde die Daten ALLER Kunden sehen. '
+            + N'Da weitere Kunden eingerichtet sind, wird abgebrochen. Bitte die Rolle entfernen - oder prüfen, ob bei @Login '
+            + N'versehentlich das Dienstkonto des Relays statt des NextGen-Logins eingetragen ist.';
+        THROW 50105, @msg, 1;
+    END
+
+    PRINT N'Hinweis: Der Login ist ' + @SeesAll + N' und sieht alle Relay-Daten. Bei nur einem Kunden unkritisch; '
+        + N'vor dem Einrichten weiterer Kunden muss die Rolle entfernt werden.';
 END
-ELSE IF IS_ROLEMEMBER(N'db_owner', @UserName) = 1
-    PRINT N'Hinweis: Der Login ist db_owner dieser Datenbank und sieht alle Relay-Daten (bei einer Einzelinstallation gewollt).';
 
 EXEC (N'GRANT SELECT, EXECUTE ON SCHEMA::[mailrelay_kunde] TO [' + @UserName + N']');
+
+COMMIT TRANSACTION;
 
 -- ------------------------------------------------------------
 -- 3. Synonyme in der NextGen-Datenbank (Schema mailrelay_ng)
@@ -131,7 +147,7 @@ SET @sql = N'DECLARE @u SYSNAME = (SELECT name FROM sys.database_principals WHER
 EXEC @exec @sql, N'@login SYSNAME', @login = @Login;
 
 PRINT N'';
-PRINT N'Kunde ' + @ShortName + N' eingerichtet (' + CASE WHEN @IsCloud = 1 THEN N'Cloud' ELSE N'Einzelinstallation' END + N').';
+PRINT N'Kunde ' + @ShortName + N' eingerichtet (' + CASE WHEN @IsCloud = 1 THEN N'eigene Relay-Datenbank' ELSE N'Relay in der NextGen-Datenbank' END + N').';
 PRINT N'Nächste Schritte:';
 PRINT N'  1. NextGen-Paket.sql in der Datenbank ' + @NextGenDb + N' ausführen.';
 PRINT N'  2. In der Relay-Weboberfläche die Profile dem Kunden zuordnen.';
