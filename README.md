@@ -158,7 +158,22 @@ Das Skript ist wiederholbar und legt an:
 Das Dienstkonto erhält nur `SELECT, INSERT, UPDATE, DELETE, EXECUTE` auf das Schema – keine DDL-Rechte – und wird
 Mitglied der Rolle `mailrelay_service` (sieht trotz Row-Level Security alle Kunden).
 
-Bei einem Update das Skript einfach erneut ausführen; es ergänzt neue Tabellen und Spalten.
+### Update einer bestehenden Installation
+
+Wurde die Datenbank mit der **ersten Version** eingerichtet (ohne Kundenzugriff), genügt
+`install/Update-Database-1.1.sql`. Es enthält nur die Neuerungen (Kunden, neue Spalten, Testmail-Aufträge,
+Row-Level Security, Kunden-Schnittstelle) und lässt vorhandene Daten unverändert. Am Ende des Skripts das
+Dienstkonto eintragen – dasselbe wie bei der Erstinstallation:
+
+```sql
+DECLARE @ServiceUser SYSNAME = N'CONTOSO\svc-mailrelay';
+```
+
+> **Wichtig:** Ohne die Rolle `mailrelay_service` sieht der Dienst nach dem Update wegen der Row-Level Security
+> keine Daten mehr. Das Skript bricht deshalb ab, solange der Platzhalter nicht ersetzt ist.
+
+Alternativ kann auch `Install-Database.sql` erneut ausgeführt werden; es ist ebenfalls wiederholbar und führt zum
+selben Ergebnis.
 
 ## 4. EXE erstellen
 
