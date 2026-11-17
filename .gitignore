@@ -12,3 +12,6 @@ install/appsettings*.json
 
 # von Visual Studio/dotnet erzeugt
 src/**/Properties/launchSettings.json
+
+# lokale Entwicklungsdaten (Tests, Logs, Verlauf)
+entwicklung/
